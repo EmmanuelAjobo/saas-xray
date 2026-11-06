@@ -1,0 +1,16 @@
+sequenceDiagram
+    autonumber
+    participant V as Visitor
+    participant W as Next.js
+    participant A as API
+    participant DB as PostgreSQL
+    participant Q as maintenance queue
+
+    V->>W: clicks "Try demo"
+    W->>A: POST /v1/auth/demo (+ Turnstile token)
+    A->>A: rate-limit: 3 demos / IP / hour
+    A->>DB: TRANSACTION: create demo User + Org (isDemo, expires 24h)<br/>clone seed: 3 members, 25 tasks, 6 clients, 10 invoices
+    A-->>W: accessToken + refresh cookie (same as normal login)
+    W-->>V: dashboard with X-ray panel open + guided tour
+    Note over A: Demo guardrails: emails routed to in-app outbox,<br/>Stripe test mode only, upload cap 2 MB, no API key export
+    Q->>DB: hourly: delete orgs where isDemo AND demoExpiresAt < now()

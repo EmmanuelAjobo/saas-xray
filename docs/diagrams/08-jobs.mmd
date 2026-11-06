@@ -1,0 +1,36 @@
+flowchart LR
+    subgraph Producers["Producers (API)"]
+        P1[Auth: verify / reset email]
+        P2[Invitations: invite email]
+        P3[Invoices: send invoice, render PDF]
+        P4[Reports: generate CSV / PDF]
+        P5[Webhooks: stripe events]
+    end
+
+    subgraph Redis_Queues["Redis (BullMQ)"]
+        QM[[email]]
+        QR[[reports]]
+        QB[[billing]]
+        QS[[maintenance<br/>repeatable / cron]]
+    end
+
+    subgraph Worker["Worker process"]
+        C1["EmailProcessor<br/>concurrency 5 • 5 retries exp backoff"]
+        C2["ReportProcessor<br/>concurrency 2 • progress events"]
+        C3["BillingProcessor<br/>concurrency 1 per org"]
+        C4["MaintenanceProcessor<br/>purge expired tokens • reset demo orgs<br/>mark overdue invoices"]
+    end
+
+    P1 & P2 & P3 --> QM
+    P3 & P4 --> QR
+    P5 --> QB
+    QS --> C4
+    QM --> C1
+    QR --> C2
+    QB --> C3
+
+    C1 --> MAIL[Email provider]
+    C2 --> S3[(S3 storage)]
+    C2 --> NOTIF["Notification + WS push<br/>'Your report is ready'"]
+    C3 --> DB[(PostgreSQL)]
+    C1 & C2 & C3 & C4 -. "after max attempts" .-> FAILED[["failed set<br/>(dead letter)<br/>inspect via Bull Board"]]

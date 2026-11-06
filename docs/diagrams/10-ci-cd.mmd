@@ -1,0 +1,15 @@
+flowchart LR
+    DEV[git push / PR] --> GH{GitHub Actions}
+    GH --> L[Install pnpm deps<br/>cache store]
+    L --> LT[Lint + typecheck<br/>+ prisma validate]
+    LT --> UT[Unit tests<br/>Jest + coverage]
+    LT --> E2E["E2E tests<br/>service containers:<br/>postgres:16, redis:7<br/>prisma migrate deploy → supertest"]
+    UT & E2E --> BLD[Docker build<br/>multi-stage]
+    BLD --> SEC[npm audit / Trivy scan]
+    SEC --> GATE{branch = main?}
+    GATE -- no --> DONE([PR status check ✓])
+    GATE -- yes --> MIG[prisma migrate deploy<br/>release command]
+    MIG --> DAPI[Deploy API service]
+    MIG --> DWRK[Deploy Worker service]
+    GATE -- yes --> VCL[Vercel auto-deploy web]
+    DAPI --> SMK[Smoke test<br/>GET /health/ready]

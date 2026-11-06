@@ -1,0 +1,470 @@
+// Data model. Blueprint: docs/diagrams/04-erd.mmd and docs/ARCHITECTURE.md §6.
+//
+// Rules applied everywhere (ARCHITECTURE.md §6.1):
+//  - UUID v7 primary keys: unguessable and time-sortable. Never auto-increment ids.
+//  - Every tenant-owned table has `organizationId`, an index that STARTS with it, and
+//    onDelete: Cascade, so deleting an org (including expired demo orgs) removes its data.
+//  - Money is integer cents + ISO 4217 currency. Never floats.
+//  - Soft delete (`deletedAt`) only where users expect "undo": tasks and invoices.
+//  - Secrets are stored only as hashes (passwords: argon2id; tokens and API keys: SHA-256).
+//  - All timestamps are UTC.
+//
+// Constraints Prisma cannot express are added by hand in the migration SQL:
+//  - one PENDING invitation per (organization, email)      (partial unique index)
+//  - emails stored lower-case                              (CHECK constraints)
+//  - non-negative money amounts and positive quantities    (CHECK constraints)
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────── Enums ───────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum AuthTokenType {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum FileStatus {
+  PENDING
+  READY
+}
+
+enum ActorType {
+  USER
+  API_KEY
+  SYSTEM
+}
+
+enum ReportStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+// ───────────────────────── Identity (global, not tenant-owned) ─────────────────────────
+
+/// One person, many organizations.
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  /// Stored lower-case (CHECK constraint in the migration); the service normalises on input.
+  email           String    @unique
+  /// null for accounts that only ever signed in with Google.
+  passwordHash    String?
+  name            String
+  emailVerifiedAt DateTime? @db.Timestamptz(3)
+  isDemo          Boolean   @default(false)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  memberships   Membership[]
+  oauthAccounts OAuthAccount[]
+  refreshTokens RefreshToken[]
+  authTokens    AuthToken[]
+  notifications Notification[]
+  uploadedFiles FileObject[]
+}
+
+model OAuthAccount {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  userId            String   @db.Uuid
+  provider          String
+  providerAccountId String
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+/// Rotating refresh tokens. Presenting an already-revoked token means it was copied:
+/// the whole `familyId` is revoked (reuse detection).
+model RefreshToken {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @db.Uuid
+  familyId     String    @db.Uuid
+  /// SHA-256 of the token. The token itself is never stored.
+  tokenHash    String    @unique
+  expiresAt    DateTime  @db.Timestamptz(3)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  /// The token that replaced this one when it was rotated.
+  replacedById String?   @db.Uuid
+  userAgent    String?
+  ip           String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Single-use email verification and password reset tokens.
+model AuthToken {
+  id        String        @id @default(uuid(7)) @db.Uuid
+  userId    String        @db.Uuid
+  type      AuthTokenType
+  /// SHA-256 of the token.
+  tokenHash String        @unique
+  expiresAt DateTime      @db.Timestamptz(3)
+  usedAt    DateTime?     @db.Timestamptz(3)
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────── Tenancy ───────────────────────────────
+
+/// The tenant.
+model Organization {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  name          String
+  slug          String    @unique
+  /// Per-org invoice counter. Incremented inside the invoice-creating transaction so
+  /// numbers are gap-free and race-free.
+  invoiceSeq    Int       @default(0)
+  isDemo        Boolean   @default(false)
+  /// Demo sandboxes are deleted by a maintenance job once this passes.
+  demoExpiresAt DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+
+  memberships   Membership[]
+  invitations   Invitation[]
+  subscription  Subscription?
+  apiKeys       ApiKey[]
+  tasks         Task[]
+  clients       Client[]
+  invoices      Invoice[]
+  files         FileObject[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  reportJobs    ReportJob[]
+
+  @@index([isDemo, demoExpiresAt])
+}
+
+model Membership {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  userId         String   @db.Uuid
+  organizationId String   @db.Uuid
+  role           Role
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedTasks Task[] @relation("TaskAssignee")
+  createdTasks  Task[] @relation("TaskCreator")
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model Invitation {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organizationId String           @db.Uuid
+  /// Stored lower-case (CHECK constraint in the migration).
+  email          String
+  role           Role
+  /// SHA-256 of the token in the invite link.
+  tokenHash      String           @unique
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime         @db.Timestamptz(3)
+  /// Who sent it. Plain id (not a relation) so the invite survives the inviter leaving.
+  invitedById    String?          @db.Uuid
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([organizationId, email])
+}
+
+// ─────────────────────────────── Billing ───────────────────────────────
+
+/// Local mirror of the Stripe subscription. The app reads this, never Stripe, on a request.
+model Subscription {
+  id                   String             @id @default(uuid(7)) @db.Uuid
+  organizationId       String             @unique @db.Uuid
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  plan                 Plan               @default(FREE)
+  status               SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd     DateTime?          @db.Timestamptz(3)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Webhook idempotency: the Stripe event id is the primary key, so a duplicate delivery
+/// fails the insert and is ignored. Global (not tenant-owned): an event arrives before
+/// we know which org it belongs to.
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model ApiKey {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  name           String
+  /// Public, non-secret part (e.g. `sk_test_ab12cd34`), used for lookup and display.
+  prefix         String    @unique
+  /// SHA-256 of the full key. The full key is shown once at creation and never stored.
+  keyHash        String
+  scopes         String[]
+  lastUsedAt     DateTime? @db.Timestamptz(3)
+  revokedAt      DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, revokedAt])
+}
+
+// ─────────────────────────── Product domain (tenant-owned) ───────────────────────────
+
+model Task {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  organizationId String       @db.Uuid
+  title          String
+  description    String?
+  status         TaskStatus   @default(TODO)
+  priority       TaskPriority @default(MEDIUM)
+  /// A membership (not a user), so the assignee is by definition a member of an org.
+  /// Removing the member unassigns their tasks instead of deleting them.
+  assigneeId     String?      @db.Uuid
+  /// Who created it (a membership). Lets a MEMBER manage "their own" tasks. Removing the
+  /// member keeps the task and clears this.
+  createdById    String?      @db.Uuid
+  dueDate        DateTime?    @db.Timestamptz(3)
+  /// Soft delete: users expect "undo".
+  deletedAt      DateTime?    @db.Timestamptz(3)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignee     Membership?  @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdBy    Membership?  @relation("TaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  attachments  FileObject[]
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, assigneeId])
+  @@index([organizationId, createdById])
+  @@index([organizationId, deletedAt])
+}
+
+model Client {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  email          String
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoices     Invoice[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, name])
+}
+
+model Invoice {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  organizationId String        @db.Uuid
+  /// A client with invoices cannot be deleted (Restrict): financial records must not dangle.
+  clientId       String        @db.Uuid
+  /// Human-facing number, unique per org, generated from Organization.invoiceSeq.
+  number         String
+  status         InvoiceStatus @default(DRAFT)
+  totalCents     Int
+  /// ISO 4217, e.g. USD.
+  currency       String        @default("USD") @db.Char(3)
+  dueDate        DateTime?     @db.Timestamptz(3)
+  /// The rendered PDF, once the background job has produced it.
+  pdfFileId      String?       @unique @db.Uuid
+  deletedAt      DateTime?     @db.Timestamptz(3)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  pdfFile      FileObject?     @relation("InvoicePdf", fields: [pdfFileId], references: [id], onDelete: SetNull)
+  lineItems    InvoiceLineItem[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, clientId])
+  @@index([organizationId, status, dueDate])
+}
+
+model InvoiceLineItem {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  invoiceId      String   @db.Uuid
+  description    String
+  quantity       Int
+  unitPriceCents Int
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// Metadata for an object in S3-compatible storage. The bytes never touch the API.
+model FileObject {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  organizationId String     @db.Uuid
+  /// `orgs/{orgId}/tasks/{taskId}/{uuid}-{name}`: the org prefix makes cleanup trivial.
+  storageKey     String     @unique
+  mimeType       String
+  sizeBytes      Int
+  /// PENDING until the upload is confirmed with HeadObject; stale PENDING rows are purged.
+  status         FileStatus @default(PENDING)
+  taskId         String?    @db.Uuid
+  uploadedById   String?    @db.Uuid
+  createdAt      DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  invoicePdfOf Invoice?     @relation("InvoicePdf")
+  reportOf     ReportJob?   @relation("ReportFile")
+
+  @@index([organizationId, taskId])
+  @@index([status, createdAt])
+}
+
+// ───────────────────────── Platform (tenant-owned) ─────────────────────────
+
+/// Append-only history of who did what. The app never updates or deletes rows.
+model AuditLog {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  /// null when the actor is the system (cron, webhook).
+  actorId        String?   @db.Uuid
+  actorType      ActorType
+  /// e.g. `invoice.sent`, `member.role_changed`.
+  action         String
+  entityType     String
+  entityId       String?   @db.Uuid
+  /// Diff of changed fields only, e.g. {"status": ["DRAFT", "SENT"]}. Never secrets.
+  changes        Json?
+  ip             String?
+  userAgent      String?
+  requestId      String?
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([organizationId, actorId])
+}
+
+model Notification {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  userId         String    @db.Uuid
+  type           String
+  payload        Json
+  readAt         DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([organizationId, createdAt])
+}
+
+model ReportJob {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  organizationId String       @db.Uuid
+  /// Report kind. Kept as text until Milestone 14 defines the set.
+  type           String
+  /// The requested options (date range, filters).
+  params         Json?
+  status         ReportStatus @default(QUEUED)
+  /// 0-100, pushed to the client over WebSocket while RUNNING.
+  progress       Int          @default(0)
+  error          String?
+  requestedById  String?      @db.Uuid
+  fileId         String?      @unique @db.Uuid
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  file         FileObject?  @relation("ReportFile", fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt])
+}

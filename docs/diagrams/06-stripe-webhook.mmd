@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant U as Org owner (browser)
+    participant A as API
+    participant S as Stripe
+    participant Q as BullMQ (billing queue)
+    participant W as Worker
+    participant DB as PostgreSQL
+    participant X as X-ray / WebSocket
+
+    U->>A: POST /v1/orgs/:orgId/billing/checkout {plan: PRO}
+    A->>S: create Customer (once) + Checkout Session<br/>metadata.organizationId
+    A-->>U: {url}
+    U->>S: pays with 4242 4242 4242 4242
+    S->>A: POST /v1/webhooks/stripe (raw body + Stripe-Signature)
+    A->>A: stripe.webhooks.constructEvent()  ✗ → 400
+    A->>DB: INSERT StripeEvent(id) ON CONFLICT DO NOTHING
+    alt duplicate event
+        A-->>S: 200 (already seen)
+    else new event
+        A->>Q: add job {eventId} (jobId = eventId)
+        A-->>S: 200 within ms (never do work inline)
+        A->>X: webhook.received
+        Q->>W: process job
+        W->>S: retrieve latest subscription (source of truth)
+        W->>DB: upsert Subscription (plan, status, periodEnd)
+        W->>DB: mark StripeEvent.processedAt, AuditLog
+        W->>X: job.completed + notification "Plan upgraded to Pro"
+    end

@@ -1,0 +1,176 @@
+erDiagram
+    User ||--o{ Membership : has
+    User ||--o{ RefreshToken : owns
+    User ||--o{ AuthToken : "verify / reset"
+    User ||--o{ OAuthAccount : links
+    Organization ||--o{ Membership : has
+    Organization ||--o{ Invitation : issues
+    Organization ||--|| Subscription : "billed by"
+    Organization ||--o{ ApiKey : owns
+    Organization ||--o{ Task : contains
+    Organization ||--o{ Client : contains
+    Organization ||--o{ Invoice : contains
+    Organization ||--o{ FileObject : stores
+    Organization ||--o{ AuditLog : records
+    Organization ||--o{ Notification : sends
+    Organization ||--o{ ReportJob : runs
+    Client ||--o{ Invoice : "billed to"
+    Invoice ||--o{ InvoiceLineItem : has
+    Task ||--o{ FileObject : attachments
+    Membership ||--o{ Task : "assigned to"
+
+    User {
+        uuid id PK
+        string email UK
+        string passwordHash "nullable (OAuth only)"
+        string name
+        datetime emailVerifiedAt
+        bool isDemo
+        datetime createdAt
+    }
+    OAuthAccount {
+        uuid id PK
+        uuid userId FK
+        string provider
+        string providerAccountId UK
+    }
+    RefreshToken {
+        uuid id PK
+        uuid userId FK
+        uuid familyId
+        string tokenHash UK
+        datetime expiresAt
+        datetime revokedAt
+        uuid replacedById
+        string userAgent
+        string ip
+    }
+    AuthToken {
+        uuid id PK
+        uuid userId FK
+        enum type "EMAIL_VERIFY | PASSWORD_RESET"
+        string tokenHash UK
+        datetime expiresAt
+        datetime usedAt
+    }
+    Organization {
+        uuid id PK
+        string name
+        string slug UK
+        int invoiceSeq "per-org invoice counter"
+        bool isDemo
+        datetime demoExpiresAt
+        datetime createdAt
+    }
+    Membership {
+        uuid id PK
+        uuid userId FK
+        uuid organizationId FK
+        enum role "OWNER | ADMIN | MEMBER"
+    }
+    Invitation {
+        uuid id PK
+        uuid organizationId FK
+        string email
+        enum role
+        string tokenHash UK
+        enum status "PENDING | ACCEPTED | REVOKED | EXPIRED"
+        datetime expiresAt
+        uuid invitedById
+    }
+    Subscription {
+        uuid id PK
+        uuid organizationId FK
+        string stripeCustomerId UK
+        string stripeSubscriptionId UK
+        enum plan "FREE | PRO"
+        enum status "ACTIVE | TRIALING | PAST_DUE | CANCELED"
+        datetime currentPeriodEnd
+    }
+    StripeEvent {
+        string id PK "evt_... (idempotency)"
+        string type
+        datetime processedAt
+    }
+    ApiKey {
+        uuid id PK
+        uuid organizationId FK
+        string name
+        string prefix UK "sk_test_ab12"
+        string keyHash
+        string[] scopes
+        datetime lastUsedAt
+        datetime revokedAt
+    }
+    Task {
+        uuid id PK
+        uuid organizationId FK
+        string title
+        text description
+        enum status "TODO | IN_PROGRESS | DONE"
+        enum priority
+        uuid assigneeId FK
+        datetime dueDate
+        datetime deletedAt
+    }
+    Client {
+        uuid id PK
+        uuid organizationId FK
+        string name
+        string email
+    }
+    Invoice {
+        uuid id PK
+        uuid organizationId FK
+        uuid clientId FK
+        string number "unique per org"
+        enum status "DRAFT | SENT | PAID | OVERDUE | VOID"
+        int totalCents
+        string currency
+        datetime dueDate
+        uuid pdfFileId
+    }
+    InvoiceLineItem {
+        uuid id PK
+        uuid invoiceId FK
+        string description
+        int quantity
+        int unitPriceCents
+    }
+    FileObject {
+        uuid id PK
+        uuid organizationId FK
+        string storageKey UK
+        string mimeType
+        int sizeBytes
+        enum status "PENDING | READY"
+        uuid taskId FK
+        uuid uploadedById
+    }
+    AuditLog {
+        uuid id PK
+        uuid organizationId FK
+        uuid actorId
+        enum actorType "USER | API_KEY | SYSTEM"
+        string action "invoice.sent"
+        string entityType
+        uuid entityId
+        json changes
+        string ip
+        string requestId
+        datetime createdAt
+    }
+    Notification {
+        uuid id PK
+        uuid organizationId FK
+        uuid userId
+        string type
+        json payload
+        datetime readAt
+    }
+    ReportJob {
+        uuid id PK
+        uuid organizationId FK
+        enum status "QUEUED | RUNNING | DONE | FAILED"
+        uuid fileId
+    }

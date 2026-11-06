@@ -1,0 +1,44 @@
+flowchart LR
+    subgraph Users
+        F["Founder / visitor<br/>(browser)"]
+        DEV["3rd-party developer<br/>(API key client)"]
+    end
+
+    subgraph Vercel
+        WEB["Next.js app<br/>app.yourdomain.com<br/>• Dashboard UI<br/>• Backend X-ray panel"]
+    end
+
+    subgraph Backend_Host["Railway / Render / Fly.io"]
+        API["NestJS API process<br/>api.yourdomain.com<br/>REST + WebSocket"]
+        WRK["NestJS Worker process<br/>(BullMQ consumers + cron)"]
+    end
+
+    subgraph Data
+        PG[("PostgreSQL<br/>Prisma")]
+        RD[("Redis<br/>queues • cache • rate limits<br/>pub/sub • socket adapter")]
+        S3[("S3-compatible storage<br/>Cloudflare R2 / MinIO")]
+    end
+
+    subgraph External
+        STRIPE["Stripe (test mode)"]
+        GOOGLE["Google OAuth"]
+        MAIL["Email provider<br/>Resend / Postmark"]
+    end
+
+    F -->|HTTPS| WEB
+    WEB -->|"REST (JWT)"| API
+    WEB <-->|"WebSocket (Socket.IO)"| API
+    DEV -->|"REST (API key)"| API
+    F -.->|"presigned PUT / GET"| S3
+
+    API --> PG
+    API --> RD
+    WRK --> PG
+    WRK --> RD
+    API -->|presign| S3
+    WRK --> S3
+
+    API <-->|OAuth 2.0| GOOGLE
+    API -->|"Checkout / Portal sessions"| STRIPE
+    STRIPE -->|"Webhooks (signed)"| API
+    WRK -->|send| MAIL

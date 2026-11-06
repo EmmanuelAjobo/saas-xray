@@ -1,0 +1,26 @@
+flowchart TB
+    REQ([Incoming HTTP request]) --> MW1["Middleware<br/>helmet • CORS • cookie-parser<br/>raw body (webhooks only)"]
+    MW1 --> MW2["ContextMiddleware (nestjs-cls)<br/>requestId = header or uuid"]
+    MW2 --> G1{"AuthGuard<br/>JWT or API key?"}
+    G1 -- invalid --> E401[401 Unauthorized]
+    G1 -- "@Public()" --> G4
+    G1 -- ok --> G2{"TenantGuard<br/>member of :orgId?"}
+    G2 -- no --> E403A[404 Not Found<br/>don't leak existence]
+    G2 -- yes --> G3{"PermissionsGuard<br/>@RequirePermission"}
+    G3 -- no --> E403[403 Forbidden]
+    G3 -- yes --> G4{"ThrottlerGuard<br/>Redis sliding window"}
+    G4 -- exceeded --> E429[429 Too Many Requests<br/>+ X-RateLimit-* headers]
+    G4 -- ok --> I1["Interceptors (before)<br/>Xray • Logging • Timeout • Cache"]
+    I1 --> P["ValidationPipe<br/>DTO whitelist + transform"]
+    P -- invalid --> E400[400 Bad Request]
+    P --> C[Controller]
+    C --> S["Service<br/>business rules + entitlements"]
+    S --> DB[("Prisma<br/>tenant-scoped client")]
+    S --> Q[[BullMQ queue]]
+    S --> EV(("Domain event<br/>audit • notifications • xray"))
+    S --> I2["Interceptors (after)<br/>response shape • timing • xray emit"]
+    I2 --> RES([HTTP response])
+
+    E401 & E403A & E403 & E429 & E400 --> F["GlobalExceptionFilter<br/>RFC 7807 problem+json<br/>includes requestId"]
+    S -. throws .-> F
+    F --> RES

@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    participant B as Browser (Next.js)
+    participant A as API /v1/auth
+    participant DB as PostgreSQL
+    participant R as Redis
+
+    Note over B,A: Login
+    B->>A: POST /auth/login {email, password}
+    A->>R: rate-limit check (IP + email)
+    A->>DB: find user, argon2.verify(hash)
+    A->>DB: insert RefreshToken (hash, familyId)
+    A-->>B: 200 {accessToken (15m)} + Set-Cookie refresh_token<br/>(HttpOnly, Secure, SameSite=Lax, Path=/v1/auth)
+    Note over B: access token kept in memory only
+
+    Note over B,A: Authenticated call
+    B->>A: GET /v1/orgs/:orgId/tasks<br/>Authorization: Bearer <access>
+    A-->>B: 200 tasks
+
+    Note over B,A: Access token expired → silent refresh
+    B->>A: POST /auth/refresh (cookie sent automatically)
+    A->>DB: lookup by sha256(token)
+    alt token valid and not revoked
+        A->>DB: revoke old, insert new (same familyId, replacedById)
+        A-->>B: 200 {new accessToken} + rotated cookie
+    else token already revoked (REUSE = theft signal)
+        A->>DB: revoke ENTIRE family
+        A-->>B: 401 → force re-login
+    end
+
+    Note over B,A: Logout
+    B->>A: POST /auth/logout
+    A->>DB: revoke token family
+    A-->>B: 204 + clear cookie

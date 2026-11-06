@@ -1,0 +1,46 @@
+block-beta
+  columns 1
+  block:edge:1
+    columns 4
+    edge_t["<b>① Edge — HTTP + WebSocket entry</b>"]:4
+    CTRL["Controllers /v1/*"] GW["RealtimeGateway (Socket.IO)"] WHC["WebhooksController (Stripe)"] SWG["Swagger /docs"]
+  end
+  space
+  block:ident:1
+    columns 6
+    ident_t["<b>② Identity and Tenancy</b>"]:6
+    AUTH["AuthModule"] USR["UsersModule"] ORG["OrganizationsModule"] MEM["MembershipsModule"] INV["InvitationsModule"] KEYS["ApiKeysModule"]
+  end
+  space
+  block:domain:1
+    columns 5
+    domain_t["<b>③ Business domain</b>"]:5
+    TSK["TasksModule"] CLI["ClientsModule"] INVC["InvoicesModule"] FIL["FilesModule"] RPT["ReportsModule"]
+  end
+  space
+  block:platform:1
+    columns 7
+    platform_t["<b>④ Platform services</b>"]:7
+    BILL["BillingModule"] JOBS["QueueModule (BullMQ)"] NOTIF["NotificationsModule"] AUD["AuditModule"] XR["XrayModule"] MAILM["MailModule"] RL["RateLimitModule"]
+  end
+  space
+  block:core:1
+    columns 8
+    core_t["<b>⑤ Core — global providers</b>"]:8
+    CFG["ConfigModule"] PRM["PrismaModule"] RDS["RedisModule"] CLS["ContextModule (cls)"] LOG["LoggerModule (pino)"] CACHE["CacheModule"] EVT["EventsModule"] HLTH["HealthModule"]
+  end
+  edge --> ident
+  ident --> domain
+  domain --> platform
+  platform --> core
+
+  style edge fill:#e8f0fe,stroke:#4a6fd1
+  style ident fill:#fde8e8,stroke:#c0504d
+  style domain fill:#e6f4ea,stroke:#3c8d50
+  style platform fill:#fff4e0,stroke:#d08b1c
+  style core fill:#eeeeee,stroke:#666666
+  style edge_t fill:none,stroke:none
+  style ident_t fill:none,stroke:none
+  style domain_t fill:none,stroke:none
+  style platform_t fill:none,stroke:none
+  style core_t fill:none,stroke:none

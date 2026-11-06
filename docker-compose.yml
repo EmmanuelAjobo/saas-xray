@@ -1,0 +1,69 @@
+# Local development infrastructure. The API and web app run on the host (hot reload);
+# only the backing services run in containers.
+#
+#   docker compose up -d        start everything and wait until healthy
+#   docker compose down         stop (data is kept in named volumes)
+#   docker compose down -v      stop and DELETE all local data
+#
+# Values come from .env (see .env.example); the defaults after `:-` match it.
+# Credentials below are for local development only. Ports are bound to 127.0.0.1
+# so nothing is reachable from other machines on the network.
+
+name: saas-xray
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-saas_xray}
+    ports:
+      # Host port 5433, not 5432: a Postgres installed on the host (very common on Windows)
+      # already owns 5432, and sharing it would risk the app touching that other database.
+      - '127.0.0.1:${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Runs once, on first start of an empty volume: creates the test database.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # noeviction: BullMQ requires that Redis never silently drops keys.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # S3-compatible object storage is added in Milestone 12 (file uploads). MinIO was the
+  # plan, but its images are no longer pullable anonymously (Docker Hub: access denied,
+  # Quay: 401), so the replacement is chosen and verified when it is actually needed.
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025' # SMTP
+      - '127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025' # web UI
+    healthcheck:
+      test: ['CMD', '/mailpit', 'readyz']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:

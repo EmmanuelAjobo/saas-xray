@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph API_Process["API process"]
+        HI[XrayInterceptor<br/>http.request]
+        CI[Cache wrapper<br/>cache.hit / miss]
+        RLG[Throttler hook<br/>ratelimit.blocked]
+        WHR[Webhook controller<br/>webhook.received]
+        PX[Prisma extension<br/>db.query count + ms]
+        QP[Queue producer<br/>job.queued]
+        XS1[XrayService.emit]
+    end
+
+    subgraph Worker_Process["Worker process"]
+        QE[BullMQ QueueEvents<br/>job.active / completed / failed]
+        XS2[XrayService.emit]
+    end
+
+    HI & CI & RLG & WHR & PX & QP --> XS1
+    QE --> XS2
+
+    XS1 & XS2 --> SAN["Sanitize + enrich<br/>redact secrets • add humanSummary<br/>attach requestId / orgId"]
+    SAN --> PUB[("Redis PUBLISH<br/>xray:{orgId}")]
+    SAN --> BUF[("Redis LIST ring buffer<br/>last 200 events, TTL 1h")]
+
+    PUB --> GW["Realtime gateway<br/>(Socket.IO + Redis adapter)"]
+    BUF -->|"replay on connect"| GW
+    GW -->|"room xray:{orgId}"| PANEL["Next.js Backend X-ray panel<br/>timeline • grouped by requestId<br/>plain-English + tech view"]

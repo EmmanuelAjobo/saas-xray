@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# What stays OUT of git, and why. Check a file with:  git check-ignore -v <path>
+# Rule of thumb: if it can be rebuilt, is private to your machine, or is a secret,
+# it does not belong in the repository.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 1. SECRETS: the most important section ───────────────────────────────────
+# Real values (database password, JWT secret, API keys) live in .env, which must
+# never be committed. A secret pushed to GitHub is compromised even if deleted later.
+# .env.example is the opposite: placeholders only, committed so newcomers know which
+# variables exist.
+.env
+.env.*
+!.env.example
+
+# Private keys and certificates (SSH, TLS, signing keys).
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+# Cloud and service credentials.
+credentials.json
+service-account*.json
+
+# ── 2. BUILD OUTPUT: rebuilt by `npm run build` ──────────────────────────────
+/dist
+/build
+*.tsbuildinfo
+
+# ── 3. DEPENDENCIES: restored by `npm install` ───────────────────────────────
+/node_modules
+
+# ── 4. GENERATED CODE: rebuilt by `npm install` / `npm run db:generate` ──────
+# The Prisma client is generated from prisma/schema.prisma. Committing it would
+# create noisy diffs and stale copies. (prisma/migrations/ IS committed: it is the
+# history of the database.)
+/src/generated
+
+# ── 5. TEST AND DIAGNOSTIC OUTPUT ────────────────────────────────────────────
+/coverage
+/.nyc_output
+# Node diagnostic reports.
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# ── 6. LOGS ──────────────────────────────────────────────────────────────────
+# Logs can contain request ids, emails and IPs: never commit them.
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# ── 7. LOCAL DATA AND SCRATCH FILES ──────────────────────────────────────────
+# Database dumps and local data can contain real personal information.
+*.sql.gz
+*.dump
+*.sqlite
+*.sqlite3
+# Temporary and backup files.
+.temp
+.tmp
+*.bak
+*.orig
+*.swp
+# Process ids and runtime data.
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# ── 8. EDITORS AND TOOLS: personal preferences, not project files ────────────
+# Ignored entirely, so a stray editor setting is never published by accident.
+# To share editor settings with a team, replace the first line with `.vscode/*` and
+# add `!.vscode/settings.json` (and tasks/launch/extensions) underneath.
+.vscode/
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+# Claude Code: personal permissions and local settings.
+/.claude/settings.local.json
+
+# ── 9. OPERATING SYSTEM FILES ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini

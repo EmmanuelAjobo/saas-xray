@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant A as API
+    participant DB as PostgreSQL
+    participant S as S3 / R2
+
+    B->>A: POST /v1/orgs/:orgId/files/upload-url<br/>{filename, mimeType, sizeBytes, taskId}
+    A->>A: validate mime allowlist + size ≤ plan limit
+    A->>DB: insert FileObject (status PENDING,<br/>key = orgs/{orgId}/tasks/{taskId}/{uuid})
+    A->>S: createPresignedPost (content-length-range,<br/>Content-Type fixed, expires 5 min)
+    A-->>B: {fileId, url, fields}
+    B->>S: POST file directly (API never touches bytes)
+    S-->>B: 204
+    B->>A: POST /v1/orgs/:orgId/files/:fileId/complete
+    A->>S: HeadObject (exists? size? type?)
+    A->>DB: status = READY, AuditLog file.uploaded
+    A-->>B: 200 file
+    Note over B,S: Download
+    B->>A: GET /v1/orgs/:orgId/files/:fileId/download
+    A->>A: tenant + permission check
+    A-->>B: 302 → presigned GET (60s,<br/>Content-Disposition: attachment)
