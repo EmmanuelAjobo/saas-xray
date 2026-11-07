@@ -289,19 +289,21 @@ Integration tests use a separate `saas_xray_test` database and refuse to run aga
 
 ## Scripts
 
-| Command                                | What it does                                                                     |
-| -------------------------------------- | -------------------------------------------------------------------------------- |
-| `npm run start:dev`                    | Run with hot reload                                                              |
-| `npm run build` / `npm run start:prod` | Compile to `dist/` and run it                                                    |
-| `npm run typecheck`                    | `tsc --noEmit`                                                                   |
-| `npm run lint`                         | oxlint (type-aware)                                                              |
-| `npm run format` / `format:check`      | Prettier                                                                         |
-| `npm run check` / `check:full`         | Everything above plus tests (see [Testing](#testing))                            |
-| `npm run db:migrate`                   | Apply pending migrations, then regenerate the Prisma client                      |
-| `npm run db:migrate:dev`               | Create a new migration after editing `prisma/schema.prisma`                      |
-| `npm run db:status`                    | Show which migrations are applied                                                |
-| `npm run db:seed`                      | (Re)create the sample organisation. Safe to repeat; refuses to run in production |
-| `npm run db:generate`                  | Regenerate the Prisma client (after any schema change)                           |
+| Command                                | What it does                                                                                                                                                                |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run start:dev`                    | Run with hot reload                                                                                                                                                         |
+| `npm run build` / `npm run start:prod` | Compile to `dist/` and run it                                                                                                                                               |
+| `npm run typecheck`                    | `tsc --noEmit`                                                                                                                                                              |
+| `npm run lint`                         | oxlint (type-aware)                                                                                                                                                         |
+| `npm run format` / `format:check`      | Prettier                                                                                                                                                                    |
+| `npm run check` / `check:full`         | Everything above plus tests (see [Testing](#testing))                                                                                                                       |
+| `npm run db:migrate`                   | Apply pending migrations, then regenerate the Prisma client                                                                                                                 |
+| `npm run db:migrate:dev`               | Create a new migration after editing `prisma/schema.prisma`                                                                                                                 |
+| `npm run db:status`                    | Show which migrations are applied                                                                                                                                           |
+| `npm run db:seed`                      | (Re)create the sample organisation. Safe to repeat; refuses to run in production                                                                                            |
+| `npm run demo:prep`                    | Before recording a demo video: creates a real account, organisation and client, empties Mailpit, prints a fresh token and ready-to-paste bodies. Local only; safe to repeat |
+| `npm run demo:stolen-token`            | Plays out a stolen refresh-token attack with clean labelled output (`200`, `401`, `401`). Exits non-zero if the server behaves differently. Local only                      |
+| `npm run db:generate`                  | Regenerate the Prisma client (after any schema change)                                                                                                                      |
 
 ## Security notes
 

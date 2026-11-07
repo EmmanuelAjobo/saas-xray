@@ -22,6 +22,8 @@
     "db:migrate": "prisma migrate deploy && prisma generate",
     "db:migrate:dev": "prisma migrate dev",
     "db:status": "prisma migrate status",
+    "demo:prep": "node scripts/video-prep.mjs",
+    "demo:stolen-token": "node scripts/stolen-token-demo.mjs",
     "db:seed": "nest build && node dist/seed/run.js",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware src/ test/",
