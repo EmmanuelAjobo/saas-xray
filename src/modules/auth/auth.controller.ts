@@ -15,12 +15,11 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import type { CookieOptions, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { UnauthenticatedError } from '../../common/errors/domain-errors.js';
-import { AppConfigService } from '../../core/config/config.service.js';
 import type { RequestAuth } from '../../core/context/request-context.service.js';
 import { RateLimit } from '../../core/rate-limit/rate-limit.decorator.js';
-import { AuthService, type ClientMeta, type Session } from './auth.service.js';
+import { AuthService, type ClientMeta } from './auth.service.js';
 import { CurrentUser } from './current-user.decorator.js';
 import {
   AuthResponseDto,
@@ -33,10 +32,7 @@ import {
 } from './dto/auth.dto.js';
 import { Public } from './public.decorator.js';
 import { SameOriginGuard } from './same-origin.guard.js';
-
-export const REFRESH_COOKIE = 'refresh_token';
-/** The cookie is only ever sent to the auth endpoints, never to the rest of the API. */
-export const REFRESH_COOKIE_PATH = '/v1/auth';
+import { REFRESH_COOKIE, SessionCookies } from './session-cookies.service.js';
 
 function clientMeta(req: Request): ClientMeta {
   return { ip: req.ip, userAgent: req.headers['user-agent'] };
@@ -47,34 +43,8 @@ function clientMeta(req: Request): ClientMeta {
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
-    private readonly config: AppConfigService,
+    private readonly cookies: SessionCookies,
   ) {}
-
-  private cookieOptions(): CookieOptions {
-    return {
-      httpOnly: true, // not readable by JavaScript: an XSS bug cannot steal it
-      secure: this.config.isProduction,
-      sameSite: 'lax',
-      path: REFRESH_COOKIE_PATH,
-    };
-  }
-
-  /** Sets the refresh cookie and returns the body (the refresh token is never in the body). */
-  private respond(res: Response, session: Session) {
-    res.cookie(REFRESH_COOKIE, session.refreshToken, {
-      ...this.cookieOptions(),
-      expires: session.refreshExpiresAt,
-    });
-    return {
-      accessToken: session.accessToken,
-      expiresIn: session.expiresIn,
-      user: session.user,
-    };
-  }
-
-  private clearCookie(res: Response): void {
-    res.clearCookie(REFRESH_COOKIE, this.cookieOptions());
-  }
 
   @Public()
   @Post('register')
@@ -89,7 +59,10 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseDto> {
-    return this.respond(res, await this.auth.register(dto, clientMeta(req)));
+    return this.cookies.start(
+      res,
+      await this.auth.register(dto, clientMeta(req)),
+    );
   }
 
   @Public()
@@ -102,7 +75,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponseDto> {
-    return this.respond(res, await this.auth.login(dto, clientMeta(req)));
+    return this.cookies.start(res, await this.auth.login(dto, clientMeta(req)));
   }
 
   @Public()
@@ -125,9 +98,12 @@ export class AuthController {
     ];
     try {
       if (!token) throw new UnauthenticatedError('Session is no longer valid.');
-      return this.respond(res, await this.auth.refresh(token, clientMeta(req)));
+      return this.cookies.start(
+        res,
+        await this.auth.refresh(token, clientMeta(req)),
+      );
     } catch (error) {
-      if (error instanceof UnauthenticatedError) this.clearCookie(res);
+      if (error instanceof UnauthenticatedError) this.cookies.clear(res);
       throw error;
     }
   }
@@ -146,7 +122,7 @@ export class AuthController {
       REFRESH_COOKIE
     ];
     await this.auth.logout(token);
-    this.clearCookie(res);
+    this.cookies.clear(res);
   }
 
   @ApiBearerAuth()
@@ -159,7 +135,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.auth.logoutAll(user.userId);
-    this.clearCookie(res);
+    this.cookies.clear(res);
   }
 
   @Public()

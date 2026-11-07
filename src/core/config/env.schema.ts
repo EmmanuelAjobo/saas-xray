@@ -201,6 +201,26 @@ const baseSchema = z.object({
   INVOICE_DEFAULT_TERMS_DAYS: intSetting(14, 1, 365),
   INVOICE_MAX_LINE_ITEMS: intSetting(100, 1, 1_000),
 
+  /** The public "Try the demo" button. Set to false to switch it off (404). */
+  DEMO_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /** Live sandboxes allowed at once; beyond this the button answers 503 until some expire. */
+  DEMO_MAX_ACTIVE: intSetting(200, 1, 100_000),
+  RATE_LIMIT_DEMO_PER_HOUR: intSetting(10, 1, 10_000),
+  /** How often expired sandboxes are deleted, in minutes. 0 turns the timer off. */
+  DEMO_PURGE_INTERVAL_MINUTES: intSetting(15, 0, 1_440),
+  /** Sandboxes deleted per purge run (the rest wait for the next run). */
+  DEMO_PURGE_BATCH_SIZE: intSetting(50, 1, 1_000),
+  /**
+   * Cloudflare Turnstile secret. When set, the demo button requires a valid challenge token
+   * (bot protection). Leave unset in development.
+   */
+  TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
+  /** Give up on the captcha provider after this long (the demo then refuses, never allows). */
+  CAPTCHA_TIMEOUT_MS: intSetting(5_000, 500, 30_000),
+
   /** How long a "Try the demo" sandbox lives before it is deleted. */
   DEMO_TTL_HOURS: intSetting(24, 1, 168),
 });

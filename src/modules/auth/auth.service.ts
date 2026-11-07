@@ -122,6 +122,22 @@ export class AuthService {
 
   // ───────────────────────────── sessions (refresh tokens) ─────────────────────────────
 
+  /**
+   * Signs in an existing user without a password: for flows that have already established
+   * who they are by other means (the demo sandbox). Never expose this to a request that
+   * names an arbitrary user.
+   */
+  async startSessionFor(userId: string, meta: ClientMeta): Promise<Session> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthenticatedError('Authentication required.');
+    return this.startSession(user, meta);
+  }
+
+  /** Ends one session (a refresh-token family), e.g. when a demo visitor switches persona. */
+  async revokeSession(sessionId: string): Promise<void> {
+    await this.revokeFamily(sessionId);
+  }
+
   /** Starts a brand-new session: a new refresh-token family. */
   private async startSession(user: User, meta: ClientMeta): Promise<Session> {
     const now = Date.now();
@@ -301,7 +317,8 @@ export class AuthService {
   requestPasswordReset(email: string): void {
     this.background.run('password-reset-email', async () => {
       const user = await this.prisma.user.findUnique({ where: { email } });
-      if (!user) return;
+      // Demo accounts have no real mailbox and no password to reset.
+      if (!user || user.isDemo) return;
       const ttlMs = this.config.get('PASSWORD_RESET_TTL_MINUTES') * MINUTE_MS;
       const url = await this.createEmailLink(
         user.id,

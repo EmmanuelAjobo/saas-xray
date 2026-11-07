@@ -11,6 +11,7 @@ import { RateLimitModule } from './core/rate-limit/rate-limit.module.js';
 import { RedisModule } from './core/redis/redis.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ClientsModule } from './modules/clients/clients.module.js';
+import { DemoModule } from './modules/demo/demo.module.js';
 import { InvitationsModule } from './modules/invitations/invitations.module.js';
 import { InvoicesModule } from './modules/invoices/invoices.module.js';
 import { MembershipsModule } from './modules/memberships/memberships.module.js';
@@ -35,6 +36,7 @@ import { TenancyModule } from './modules/tenancy/tenancy.module.js';
     // Authentication, then tenancy: guards run in the order their modules are listed
     // (rate limit → authenticate → membership → permission).
     AuthModule,
+    DemoModule,
     TenancyModule,
     // Features.
     OrganizationsModule,

@@ -61,6 +61,11 @@ export class PlanLimitExceededError extends DomainError {
   }
 }
 
+/** The service cannot take this request right now (capacity). The caller may try again later. */
+export class TemporarilyUnavailableError extends DomainError {
+  readonly code = 'TEMPORARILY_UNAVAILABLE';
+}
+
 /** An email-verification, password-reset or invitation token that is unknown, used or expired. */
 export class InvalidTokenError extends DomainError {
   readonly code = 'INVALID_TOKEN';

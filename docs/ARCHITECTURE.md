@@ -728,6 +728,14 @@ export interface XrayEvent {
 - **Cleanup:** hourly maintenance job deletes orgs where `isDemo AND demoExpiresAt < now()` (cascade) and their S3 prefix.
 - Frontend opens the dashboard with the X-ray panel open and a 4-step guided tour.
 
+> **As built (Milestone 7):** `POST /v1/auth/demo` and `POST /v1/demo/switch-role` are implemented as described, from the same `seedDemoOrganization()` template as `npm run db:seed` (one transaction, about 0.3 s warm). Differences and decisions:
+> - **Captcha:** Cloudflare Turnstile is optional: when `TURNSTILE_SECRET_KEY` is set the body must carry a valid token, otherwise no check runs (local development). It fails closed if Cloudflare cannot be reached.
+> - **Limits:** the per-IP limit is `RATE_LIMIT_DEMO_PER_HOUR` (default 10, not 3, so a founder can retry and a shared office IP still works). `DEMO_MAX_ACTIVE` (default 200) is a soft cap on live sandboxes; over it, `503 TEMPORARILY_UNAVAILABLE`. `DEMO_ENABLED=false` turns the feature off (404).
+> - **Role switching** moves between the three people of the visitor's own sandbox and replaces the session (the previous persona's refresh session is revoked). It cannot leave the sandbox.
+> - **Guardrails already in place** because demo accounts are flagged `isDemo`: no organisation creation, no invitations, no password (and "forgot password" sends nothing), no real email from invoice sending. **Still to come** with their features: the in-app email outbox, upload cap, API-key expiry, hiding Bull Board.
+> - **Cleanup:** an in-process timer (`DEMO_PURGE_INTERVAL_MINUTES`, default 15; 0 turns it off) calls `DemoCleanupService.purgeExpired()`, which deletes expired sandboxes in batches (everything cascades), spares the permanent sample organisation, and also removes demo users orphaned when a visitor deleted their own sandbox. Overlapping runs from several API instances are harmless (plain deletes). It becomes the hourly `cleanup-demo-orgs` job in Milestone 10; the S3 prefix cleanup arrives with file uploads.
+> - The access token of an expired visitor stays valid until it expires (15 minutes) but opens nothing: the user no longer exists, so `/auth/me` answers 401 and organisation routes 404.
+
 ---
 
 ## 19. Decisions to confirm before building

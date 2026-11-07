@@ -25,6 +25,12 @@ describe('tunable settings', () => {
       RATE_LIMIT_RESEND_PER_HOUR: 5,
       DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
       DATABASE_POOL_MAX: 10,
+      DEMO_ENABLED: true,
+      DEMO_MAX_ACTIVE: 200,
+      RATE_LIMIT_DEMO_PER_HOUR: 10,
+      DEMO_PURGE_INTERVAL_MINUTES: 15,
+      DEMO_PURGE_BATCH_SIZE: 50,
+      CAPTCHA_TIMEOUT_MS: 5_000,
       PAGE_SIZE_DEFAULT: 20,
       PAGE_SIZE_MAX: 100,
       INVOICE_DEFAULT_CURRENCY: 'USD',
@@ -71,6 +77,13 @@ describe('tunable settings', () => {
     ['DEMO_TTL_HOURS', '0'],
     ['MAX_ORGS_PER_USER', '0'],
     ['PAGE_SIZE_MAX', '0'],
+    ['DEMO_ENABLED', 'yes'],
+    ['DEMO_ENABLED', '1'],
+    ['DEMO_MAX_ACTIVE', '0'],
+    ['RATE_LIMIT_DEMO_PER_HOUR', '0'],
+    ['DEMO_PURGE_INTERVAL_MINUTES', '-1'],
+    ['DEMO_PURGE_BATCH_SIZE', '0'],
+    ['CAPTCHA_TIMEOUT_MS', '1'],
     ['PAGE_SIZE_DEFAULT', '-1'],
     ['INVOICE_DEFAULT_CURRENCY', 'usd'],
     ['INVOICE_DEFAULT_CURRENCY', 'US'],
@@ -110,6 +123,30 @@ describe('tunable settings', () => {
         PRO_PLAN_MAX_SEATS: '10',
       }).PRO_PLAN_MAX_SEATS,
     ).toBe(10);
+  });
+
+  it('parses DEMO_ENABLED as a real boolean, and allows 0 to turn the purge timer off', () => {
+    expect(validateEnv({ ...valid, DEMO_ENABLED: 'false' }).DEMO_ENABLED).toBe(
+      false,
+    );
+    expect(validateEnv({ ...valid, DEMO_ENABLED: 'true' }).DEMO_ENABLED).toBe(
+      true,
+    );
+    expect(
+      validateEnv({ ...valid, DEMO_PURGE_INTERVAL_MINUTES: '0' })
+        .DEMO_PURGE_INTERVAL_MINUTES,
+    ).toBe(0);
+  });
+
+  it('keeps Turnstile optional: absent means "off", present is passed through', () => {
+    expect(validateEnv(valid).TURNSTILE_SECRET_KEY).toBeUndefined();
+    expect(
+      validateEnv({ ...valid, TURNSTILE_SECRET_KEY: 's3cret' })
+        .TURNSTILE_SECRET_KEY,
+    ).toBe('s3cret');
+    expect(
+      validateEnv({ ...valid, TURNSTILE_SECRET_KEY: '' }).TURNSTILE_SECRET_KEY,
+    ).toBeUndefined();
   });
 
   it('refuses a default page size larger than the maximum', () => {

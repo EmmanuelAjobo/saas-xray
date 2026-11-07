@@ -4,7 +4,7 @@
 
 This is a portfolio project, built in public, milestone by milestone. The design, with diagrams and the reasoning behind each decision, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> **Last updated:** after Milestone 6 (the tenant data layer, clients, tasks and invoices). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+> **Last updated:** after Milestone 7 (the "Try demo" button). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
 
 ## Contents
 
@@ -37,10 +37,11 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | Invitations, seat limits        |   ✅   | Invite by email, accept by link, plan seat limits (FREE 3, PRO 25), revoke and re-send                                           |
 | Tenant data layer               |   ✅   | A second line of defence: every database query is confined to the current organisation, and cross-organisation links are refused |
 | Clients, tasks, invoices        |   ✅   | CRUD with paging and search; invoice numbering, money in cents, and a state machine (DRAFT → SENT → PAID / VOID)                 |
+| "Try demo" button               |   ✅   | One click, no sign-up: a private, fully populated sandbox per visitor, role switching, bot protection, auto-cleanup              |
 | Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
 | X-ray panel                     |   ⏳   | Planned                                                                                                                          |
 
-Tests at this point: **836** (392 unit, 47 HTTP, 397 integration against real Postgres and Redis).
+Tests at this point: **899** (423 unit, 47 HTTP, 429 integration against real Postgres and Redis).
 
 ## Engineering highlights
 
@@ -141,7 +142,7 @@ Every route needs a token unless it is marked public. Errors are RFC 7807 `appli
 | `POST /forgot-password`, `POST /reset-password`   | Always answers `202`. The link is single-use, short-lived, and signs out every session              |
 | `GET /me`                                         | The signed-in user and their organisations                                                          |
 
-The access token (15 minutes by default) goes in `Authorization: Bearer ...` and should be kept in memory. The refresh token lives only in an `HttpOnly` cookie scoped to `/v1/auth`, and only its SHA-256 hash is stored. Not built yet: Google sign-in and the one-click demo login (Milestone 8).
+The access token (15 minutes by default) goes in `Authorization: Bearer ...` and should be kept in memory. The refresh token lives only in an `HttpOnly` cookie scoped to `/v1/auth`, and only its SHA-256 hash is stored. Not built yet: Google sign-in (it needs OAuth credentials).
 
 ### Organisations (`/v1/orgs`)
 
@@ -178,6 +179,20 @@ Rules: you cannot change your own role; only an owner can change an owner or gra
 How it works: the emailed link carries a 256-bit token that is stored only as a hash. A **seat** is a member or an unexpired pending invitation, so you cannot out-invite your plan (`402` with an upgrade link when full; `FREE_PLAN_MAX_SEATS` / `PRO_PLAN_MAX_SEATS`). Every wrong-token case (unknown, expired, revoked, used, wrong account) gets the identical `400`, so none can be told apart. Accepting is an atomic claim, so a link opened twice at once works exactly once. Ownership is never granted by invitation. Demo accounts cannot invite.
 
 Roles and permissions are one table in [src/modules/tenancy/permissions.ts](src/modules/tenancy/permissions.ts), checked against the table in [ARCHITECTURE §8.3](docs/ARCHITECTURE.md) by a test. Creating organisations is capped per user (`MAX_ORGS_PER_USER`, default 5) and rate limited (`RATE_LIMIT_ORG_CREATE_PER_HOUR`).
+
+### Try the demo (`/v1/auth/demo`, `/v1/demo/switch-role`)
+
+| Endpoint                 | Who          | What it does                                                                                         |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------------------------------- |
+| `POST /auth/demo`        | anyone       | Creates a private sandbox (3 people, 25 tasks, 6 clients, 10 invoices) and signs you in as its owner |
+| `POST /demo/switch-role` | demo account | Become the sandbox's `OWNER`, `ADMIN` or `MEMBER` to feel role-based access; replaces your session   |
+
+The response is a normal login (access token in the body, refresh token in the cookie) plus the sandbox `organization`, your `role` and when it `expiresAt`. A warm request takes about 0.3 s.
+
+- **Isolated:** every visitor gets their own organisation; nothing is shared and nobody can see anyone else's.
+- **Safe by construction:** demo accounts cannot create organisations or invite people, have no password, and invoices sent from a sandbox send no real email.
+- **Temporary:** a sandbox lives `DEMO_TTL_HOURS` (default 24). Expired sandboxes, everything in them and their demo users are deleted by a cleanup that runs every `DEMO_PURGE_INTERVAL_MINUTES` (it becomes a queue job later). The sample organisation from `npm run db:seed` is never purged.
+- **Protected:** rate limited per IP (`RATE_LIMIT_DEMO_PER_HOUR`), capped at `DEMO_MAX_ACTIVE` live sandboxes (answers `503` when busy), and, when `TURNSTILE_SECRET_KEY` is set, requires a Cloudflare Turnstile token in the body (`{ "turnstileToken": "..." }`). The captcha fails closed: if Cloudflare cannot be reached, nobody gets a sandbox. `DEMO_ENABLED=false` switches the whole feature off (it then answers `404`).
 
 ### Clients (`/v1/orgs/:orgId/clients`)
 
@@ -233,7 +248,7 @@ Nothing that is sensitive or tunable is hard-coded. Every setting is read from t
 - **Secrets and credentials:** `JWT_ACCESS_SECRET`, `DATABASE_URL`, `RESEND_API_KEY`, the Postgres password.
 - **Security policy:** link lifetimes (`EMAIL_VERIFY_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`), session lengths, password-hashing cost (`PASSWORD_HASH_*`), and every rate limit (`RATE_LIMIT_*`).
 - **Timeouts and retries:** database, mail, health checks, Redis, CORS cache.
-- **Ports and the demo sandbox lifetime** (`DEMO_TTL_HOURS`).
+- **Ports and the demo** (`DEMO_ENABLED`, `DEMO_TTL_HOURS`, `DEMO_MAX_ACTIVE`, `DEMO_PURGE_*`, `TURNSTILE_SECRET_KEY`).
 
 Numbers that are _not_ settings stay in code, named, with a comment: time units (`src/common/time.ts`), limits that come from a standard or the API contract such as the 254-character email maximum and the password length bounds (`src/common/limits.ts`), and hard safety bounds on untrusted input (`src/core/config/security-limits.ts`). Changing those changes what clients may send, so they go through code review rather than a deploy setting.
 
@@ -326,6 +341,7 @@ src/
 │   ├── memberships/      team list, role changes, removal, leaving
 │   ├── invitations/      invite, resend, revoke, preview, accept
 │   ├── clients/  tasks/  invoices/   the product domain (tenant-scoped client only)
+│   ├── demo/             sandbox creation, role switching, expiry cleanup, captcha
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations
@@ -355,7 +371,7 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 - ✅ Invitations, with plan seat limits
 - ✅ Clients, tasks and invoices, with the invoice state machine
 - ⏳ Invoice `Idempotency-Key` header and the overdue job (arrives with the job queue)
-- ⏳ "Try demo" endpoint (the seed template is already reusable for it)
+- ✅ "Try demo" endpoint, role switching, sandbox cleanup
 - ⏳ Deploy
 
 **Phase 2: SaaS platform**

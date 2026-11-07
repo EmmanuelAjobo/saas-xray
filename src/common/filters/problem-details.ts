@@ -4,6 +4,7 @@ import {
   DomainError,
   EmailNotVerifiedError,
   PlanLimitExceededError,
+  TemporarilyUnavailableError,
   ForbiddenError,
   InvalidStateTransitionError,
   InvalidTokenError,
@@ -77,6 +78,11 @@ const DOMAIN_ERROR_STATUS: Array<
   [LimitReachedError, HttpStatus.FORBIDDEN, 'Limit reached'],
   [EmailNotVerifiedError, HttpStatus.FORBIDDEN, 'Email not verified'],
   [PlanLimitExceededError, HttpStatus.PAYMENT_REQUIRED, 'Plan limit exceeded'],
+  [
+    TemporarilyUnavailableError,
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'Temporarily unavailable',
+  ],
   [
     InvalidStateTransitionError,
     HttpStatus.CONFLICT,

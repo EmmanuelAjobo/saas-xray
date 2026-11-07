@@ -32,6 +32,10 @@ export const RATE_LIMIT_POLICIES = {
     limit: 'RATE_LIMIT_RESEND_PER_HOUR',
     windowMs: HOUR_MS,
   },
+  demo: {
+    limit: 'RATE_LIMIT_DEMO_PER_HOUR',
+    windowMs: HOUR_MS,
+  },
   invite: {
     limit: 'RATE_LIMIT_INVITE_PER_HOUR',
     windowMs: HOUR_MS,
