@@ -1,0 +1,26 @@
+# What must NOT be sent to the Docker build. Anything listed here can never end up in an
+# image, so secrets cannot leak and the build context stays small and cache-friendly.
+
+# Secrets and local settings: real values never go in an image.
+.env
+.env.*
+!.env.example
+
+# Rebuilt inside the image.
+node_modules
+dist
+coverage
+src/generated
+*.tsbuildinfo
+
+# Not needed to build or run.
+.git
+.github
+.vscode
+docs
+test
+scripts
+README.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

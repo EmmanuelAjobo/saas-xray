@@ -19,6 +19,7 @@ This is a portfolio project, built in public, milestone by milestone. The design
 - [Database](#database)
 - [Testing](#testing)
 - [Scripts](#scripts)
+- [Deploying](#deploying)
 - [Security notes](#security-notes)
 - [Project layout](#project-layout)
 - [What is (and is not) in git](#what-is-and-is-not-in-git)
@@ -298,12 +299,49 @@ Integration tests use a separate `saas_xray_test` database and refuse to run aga
 | `npm run format` / `format:check`      | Prettier                                                                                                                                                                    |
 | `npm run check` / `check:full`         | Everything above plus tests (see [Testing](#testing))                                                                                                                       |
 | `npm run db:migrate`                   | Apply pending migrations, then regenerate the Prisma client                                                                                                                 |
+| `npm run db:migrate:deploy`            | Apply pending migrations only (what the production container runs on start)                                                                                                 |
 | `npm run db:migrate:dev`               | Create a new migration after editing `prisma/schema.prisma`                                                                                                                 |
 | `npm run db:status`                    | Show which migrations are applied                                                                                                                                           |
 | `npm run db:seed`                      | (Re)create the sample organisation. Safe to repeat; refuses to run in production                                                                                            |
 | `npm run demo:prep`                    | Before recording a demo video: creates a real account, organisation and client, empties Mailpit, prints a fresh token and ready-to-paste bodies. Local only; safe to repeat |
 | `npm run demo:stolen-token`            | Plays out a stolen refresh-token attack with clean labelled output (`200`, `401`, `401`). Exits non-zero if the server behaves differently. Local only                      |
 | `npm run db:generate`                  | Regenerate the Prisma client (after any schema change)                                                                                                                      |
+
+## Deploying
+
+The API ships as one Docker image ([Dockerfile](Dockerfile)): multi-stage, runs as a non-root user, applies pending database migrations on start ([docker/entrypoint.sh](docker/entrypoint.sh)), and has a liveness healthcheck. It works on any host that runs containers (Railway, Render, Fly.io, a VPS).
+
+**Try the production image on your machine** (a throwaway stack with its own database, separate from development):
+
+```bash
+export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+export JWT_ACCESS_SECRET="$(openssl rand -base64 48)"
+export WEB_ORIGIN="http://localhost:3001"
+docker compose -f docker-compose.prod.yml up -d --build --wait   # first build takes several minutes
+curl http://localhost:3000/health/ready                          # {"status":"ok", postgres up, redis up}
+docker compose -f docker-compose.prod.yml down -v                # remove it and its data
+```
+
+[docker-compose.prod.yml](docker-compose.prod.yml) refuses to start without the secrets, publishes nothing but the API on localhost, and is also a valid single-server deployment when a reverse proxy with HTTPS sits in front.
+
+**On a managed platform**, create the API service from this repository's Dockerfile, add Postgres and Redis, and set at least:
+
+| Variable                               | Value                                                                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                             | `production`                                                                                                           |
+| `DATABASE_URL`, `REDIS_URL`            | From the platform's Postgres and Redis                                                                                 |
+| `JWT_ACCESS_SECRET`                    | `openssl rand -base64 48`. The app refuses to start in production with the example value                               |
+| `WEB_ORIGIN`                           | The exact origin of the web app, for CORS (no wildcards)                                                               |
+| `TRUST_PROXY_HOPS`                     | `1` behind a platform load balancer, so rate limiting sees real client IPs                                             |
+| `MAIL_DRIVER`, `RESEND_API_KEY`        | `resend` and your key; with `smtp`, set `SMTP_URL`                                                                     |
+| `MAIL_FROM`                            | A sender on a domain you verified with your email provider                                                             |
+| `TURNSTILE_SECRET_KEY` (recommended)   | Protects the public demo button from bots                                                                              |
+
+Every other setting has a default; the full list is in [.env.example](.env.example). Use the platform's health check on `/health/ready`. Set `RUN_MIGRATIONS=false` if the platform runs `npm run db:migrate:deploy` as its own release step.
+
+**Domain note:** the refresh token is a `SameSite=Lax` cookie. The API and the web app must share a registrable domain (for example `api.example.com` and `app.example.com`), or sign-in will not persist in browsers that block third-party cookies.
+
+**CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request: Prisma schema validation, formatting, typecheck, lint, all three test layers against Postgres and Redis service containers, and a second job that builds this image and boots it on a fresh database. A change that breaks the image or a migration fails the build.
 
 ## Security notes
 
@@ -347,6 +385,10 @@ src/
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations
+Dockerfile  docker/       production image and its start-up script
+docker-compose.yml        development services (Postgres, Redis, Mailpit)
+docker-compose.prod.yml   production-like stack: the image + Postgres + Redis
+.github/workflows/        CI
 test/                     HTTP and integration tests, and their helpers
 docs/                     architecture, diagrams and images
 ```
@@ -374,7 +416,7 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 - ✅ Clients, tasks and invoices, with the invoice state machine
 - ⏳ Invoice `Idempotency-Key` header and the overdue job (arrives with the job queue)
 - ✅ "Try demo" endpoint, role switching, sandbox cleanup
-- ⏳ Deploy
+- 🟡 Deploy: production image, migrations on start and CI are done and verified; going live needs a hosting account and a domain
 
 **Phase 2: SaaS platform**
 

@@ -18,6 +18,10 @@ generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"
   moduleFormat = "esm"
+  // Imports inside the generated client end in ".js", which is what the compiled output needs.
+  // Left unset, Prisma guesses from tsconfig.json and emits ".ts" when none is in sight
+  // (as in a Docker build), which crashes at start-up with ERR_MODULE_NOT_FOUND.
+  importFileExtension = "js"
 }
 
 datasource db {

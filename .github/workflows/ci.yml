@@ -1,0 +1,78 @@
+# Runs on every push to main and on every pull request.
+# Two independent jobs: the full test suite, and a build-and-boot check of the Docker image.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch cancels the older run: no queue of stale checks.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# The workflow only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, lint and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: saas_xray_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # The test database name must end in _test (a safety check in the test setup).
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/saas_xray_test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/saas_xray_test
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npm run format:check
+      - run: npm run check:full
+
+  docker:
+    name: Docker image builds and boots
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image, start the stack on a fresh database, check readiness
+        env:
+          # Throwaway values: this stack exists for a minute and holds no real data.
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          JWT_ACCESS_SECRET: ci-only-jwt-secret-that-is-at-least-32-characters
+          WEB_ORIGIN: http://localhost:3001
+        run: |
+          docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 180
+          curl --fail --silent --show-error http://localhost:3000/health/ready
+      - name: Show logs if it failed
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --no-color
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          JWT_ACCESS_SECRET: ci-only-jwt-secret-that-is-at-least-32-characters
+          WEB_ORIGIN: http://localhost:3001

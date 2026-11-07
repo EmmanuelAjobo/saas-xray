@@ -1,0 +1,85 @@
+# A production-like stack: the real image + Postgres + Redis, in one file.
+#
+# Two uses:
+#   1. Smoke test: prove the image builds, migrates a fresh database and serves traffic
+#      (CI does exactly this on every push).
+#   2. A simple deployment to any single machine that has Docker (a VPS) when you do not
+#      want a managed platform.
+#
+# Unlike docker-compose.yml (development: the app runs on your host, nothing is secret),
+# this file REFUSES to start unless the secrets are provided. Example:
+#
+#   export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+#   export JWT_ACCESS_SECRET="$(openssl rand -base64 48)"
+#   export WEB_ORIGIN="https://app.example.com"
+#   docker compose -f docker-compose.prod.yml up -d --build --wait
+#   docker compose -f docker-compose.prod.yml down        # stop, keep data
+#   docker compose -f docker-compose.prod.yml down -v     # stop and DELETE all data
+#
+# Every other app setting (rate limits, plan seats, demo...) can be passed the same way as an
+# environment variable; see .env.example for the full list and the defaults.
+name: saas-xray-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saas_xray
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: saas_xray
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # No published port: only the api container can reach the database.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U saas_xray -d saas_xray']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    image: saas-xray:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # One reverse proxy (Caddy, nginx, a platform load balancer) sits in front.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN}
+      DATABASE_URL: postgresql://saas_xray:${POSTGRES_PASSWORD}@postgres:5432/saas_xray
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      ERROR_DOCS_BASE_URL: ${ERROR_DOCS_BASE_URL:-http://localhost:3000/docs/errors}
+      MAIL_DRIVER: ${MAIL_DRIVER:-smtp}
+      SMTP_URL: ${SMTP_URL:-smtp://localhost:1025}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-SaaS X-ray <no-reply@saas-xray.local>}
+      DEMO_ENABLED: ${DEMO_ENABLED:-true}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+    ports:
+      # Bound to localhost: put a reverse proxy with HTTPS in front to expose it.
+      - '127.0.0.1:${API_PORT:-3000}:3000'
+    # The image's own HEALTHCHECK (liveness) is what `--wait` waits for.
+
+volumes:
+  postgres-data:
+  redis-data:
