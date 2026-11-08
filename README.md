@@ -4,7 +4,7 @@
 
 This is a portfolio project, built in public, milestone by milestone. The design, with diagrams and the reasoning behind each decision, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> **Last updated:** after Milestone 8 (the Backend X-ray, API side). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+> **Last updated:** after Milestone 9 (the demo page with the live X-ray panel). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
 
 ## Contents
 
@@ -42,7 +42,7 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | Deploy                          |   ✅   | Docker image, migrations on start, CI, live on Railway ([guide](docs/DEPLOY-RAILWAY.md))                                         |
 | Backend X-ray (API)             |   ✅   | Every request leaves a plain-English trail (membership, permission, database, answer), as history and a live stream             |
 | Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
-| X-ray panel (screen)            |   ⏳   | Planned: the visual timeline that reads the X-ray API                                                                            |
+| Demo page + X-ray panel         |   ✅   | One click into a sandbox; invoices, role switching, "try to break it" buttons, and the live X-ray timeline beside them             |
 
 Tests at this point: **1,052** (537 unit, 47 HTTP, 468 integration against real Postgres and Redis).
 
@@ -101,6 +101,7 @@ Then open:
 
 | What                        | Where                                                  |
 | --------------------------- | ------------------------------------------------------ |
+| **The demo page**           | <http://localhost:3000/> (click, then watch the X-ray) |
 | API                         | <http://localhost:3000> (versioned routes under `/v1`) |
 | Swagger UI                  | <http://localhost:3000/docs> (JSON at `/docs-json`)    |
 | Health                      | `GET /health/live` and `GET /health/ready`             |
@@ -111,6 +112,13 @@ Postgres is exposed on **5433**, not the default 5432, so it cannot clash with a
 > **WSL users:** keep the repo on the Linux filesystem (for example `~/saas-xray`), not under `/mnt/c`. Node loads thousands of small files at startup and the Windows mount makes that about 30 times slower.
 
 ## Try it
+
+**In the browser** (<http://localhost:3000/>, or the live site): click **Start the live demo**. You get a private sandbox company. Click around the invoices; on the right the **Backend X-ray** narrates every request as it happens. Then try to break it:
+
+- **Mark paid** on a draft, or **Try it** under "Pay an invoice that was never sent": the server refuses with a 409 and says why.
+- Switch the role at the top to **Member** and create a client: refused (403), and the X-ray shows exactly which permission was missing.
+- **Peek at another company**: a stranger's sandbox asks for your data and gets a 404. Nothing appears in your X-ray, because strangers leave no trace.
+- Flip the X-ray between **Plain English** and **Developer** to see ids, timings and the raw facts.
 
 **In Swagger** (<http://localhost:3000/docs>): call `POST /v1/auth/register`, copy the `accessToken` from the response, click **Authorize** and paste it. Then call `GET /v1/auth/me`. The verification email appears in Mailpit.
 
@@ -421,6 +429,7 @@ src/
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations
+web/                      the demo page: index.html, styles.css, js/ (served by the API at /)
 Dockerfile  docker/       production image and its start-up script
 docker-compose.yml        development services (Postgres, Redis, Mailpit)
 docker-compose.prod.yml   production-like stack: the image + Postgres + Redis
@@ -464,7 +473,7 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 **Phase 3: show-off and quality**
 
 - ✅ The Backend X-ray API: events, history and live stream (more event kinds arrive with jobs, cache and webhooks)
-- ⏳ The X-ray panel (the screen that reads the API)
+- ✅ The demo page with the live X-ray panel (plain HTML, CSS and JavaScript served by the API; no build step)
 - ⏳ Audit log
 - ✅ Tenant-isolation test suite
 - ✅ GitHub Actions CI

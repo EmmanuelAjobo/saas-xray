@@ -1,5 +1,7 @@
 import { VersioningType } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import cookieParser from 'cookie-parser';
 import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
@@ -24,7 +26,16 @@ export function configureApp(app: NestExpressApplication): void {
 
   // Security headers. Swagger UI needs inline scripts/styles, which the strict default CSP
   // forbids, so only the docs pages get a relaxed policy; the API itself stays strict.
-  const strictHelmet = helmet();
+  // `upgrade-insecure-requests` (helmet's default) makes Safari refuse plain-http localhost,
+  // so it is kept for production only, where everything is served over https anyway.
+  const strictHelmet = helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'upgrade-insecure-requests': config.isProduction ? [] : null,
+      },
+    },
+  });
   const docsHelmet = helmet({ contentSecurityPolicy: false });
   app.use((req: Request, res: Response, next: NextFunction) => {
     const isDocs =
@@ -34,6 +45,8 @@ export function configureApp(app: NestExpressApplication): void {
   });
 
   app.use(cookieParser());
+
+  serveWebApp(app);
 
   // Exact-origin allowlist. Credentials are allowed (refresh-token cookie), so a wildcard
   // would be both invalid and dangerous.
@@ -65,4 +78,31 @@ export function configureApp(app: NestExpressApplication): void {
   app.enableShutdownHooks();
 
   setupSwagger(app);
+}
+
+/** The test files that live next to the page's scripts are not part of the site. */
+const WEB_SPEC_FILE = /\.spec\.js$/;
+
+/**
+ * Serves the demo page (the `web/` folder) at `/`. It is plain static files, served by the
+ * API itself, so the page and the API share one origin: no CORS, and the sign-in cookie
+ * works without a custom domain. API routes (/v1, /docs, /health) are untouched: a path
+ * that is not a file falls straight through to them.
+ */
+function serveWebApp(app: NestExpressApplication): void {
+  const root = fileURLToPath(new URL('../web', import.meta.url));
+  if (!existsSync(root)) return; // e.g. an image built without the page
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (WEB_SPEC_FILE.test(req.path)) {
+      res.status(404).type('text/plain').send('Not found');
+      return;
+    }
+    next();
+  });
+  // Revalidated on every load (cheap 304s thanks to ETags): a deploy shows up immediately.
+  app.useStaticAssets(root, {
+    index: 'index.html',
+    dotfiles: 'ignore',
+    maxAge: 0,
+  });
 }

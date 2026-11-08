@@ -43,6 +43,8 @@ COPY prisma ./prisma
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+# The demo page: plain static files, served by the API at /.
+COPY web ./web
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN chmod +x ./docker/entrypoint.sh
 
