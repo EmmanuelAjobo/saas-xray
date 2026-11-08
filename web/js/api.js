@@ -39,13 +39,23 @@ export function createApi({
 } = {}) {
   /** @type {string | undefined} */
   let token;
+  /** @type {User | undefined} */
+  let user;
   /** @type {Promise<boolean> | undefined} */
   let refreshing;
 
   /** @param {string | undefined} next */
   function setToken(next) {
     token = next;
+    // No token, no signed-in user: never keep a name around for a session that is gone.
+    if (next === undefined) user = undefined;
     onToken(next);
+  }
+
+  /** @param {SessionBody} session */
+  function adopt(session) {
+    user = session.user;
+    setToken(session.accessToken);
   }
 
   /**
@@ -96,7 +106,7 @@ export function createApi({
         }
         /** @type {SessionBody} */
         const session = await parse(response);
-        setToken(session.accessToken);
+        adopt(session);
         return true;
       } catch {
         return false;
@@ -129,6 +139,10 @@ export function createApi({
     get token() {
       return token;
     },
+    /** Who is signed in, as last reported by the server (undefined when nobody is). */
+    get user() {
+      return user;
+    },
     /** @param {string | undefined} next */
     setToken,
 
@@ -139,7 +153,7 @@ export function createApi({
         body: {},
         bearer: null,
       });
-      setToken(session.accessToken);
+      adopt(session);
       return session;
     },
 
@@ -162,7 +176,7 @@ export function createApi({
       const session = await request('POST', '/v1/demo/switch-role', {
         body: { role },
       });
-      setToken(session.accessToken);
+      adopt(session);
       return session;
     },
   };

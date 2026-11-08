@@ -55,6 +55,48 @@ describe('createApi', () => {
     expect(tokens).toEqual(['t1']);
   });
 
+  describe('who is signed in', () => {
+    const asUser = (token, isDemo) => ({
+      accessToken: token,
+      expiresIn: 900,
+      user: { id: 'u', email: 'e', name: 'n', isDemo },
+    });
+
+    it('knows whether the signed-in user is a demo user, after starting a demo', async () => {
+      const { fetchImpl } = fake(json(200, asUser('t1', true)));
+      const api = createApi({ fetchImpl });
+      expect(api.user).toBeUndefined();
+      await api.startDemo();
+      expect(api.user?.isDemo).toBe(true);
+    });
+
+    it('learns it from the refresh cookie too (a returning visitor, or a real account)', async () => {
+      const { fetchImpl } = fake(json(200, asUser('t1', false)));
+      const api = createApi({ fetchImpl });
+      expect(await api.refresh()).toBe(true);
+      expect(api.user?.isDemo).toBe(false);
+    });
+
+    it('forgets the user when the session ends', async () => {
+      const { fetchImpl } = fake(json(200, asUser('t1', true)));
+      const api = createApi({ fetchImpl });
+      await api.startDemo();
+      api.setToken(undefined);
+      expect(api.user).toBeUndefined();
+    });
+
+    it('forgets the user when the cookie can no longer renew the session', async () => {
+      const { fetchImpl } = fake(
+        json(200, asUser('t1', true)),
+        json(401, { status: 401 }),
+      );
+      const api = createApi({ fetchImpl });
+      await api.startDemo();
+      expect(await api.refresh()).toBe(false);
+      expect(api.user).toBeUndefined();
+    });
+  });
+
   it('turns an error answer into an ApiError with the server’s own words', async () => {
     const { fetchImpl } = fake(
       json(409, {
