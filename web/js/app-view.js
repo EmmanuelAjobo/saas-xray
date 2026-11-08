@@ -8,7 +8,7 @@ const ROLES = [
 ];
 
 /** The first screen: one clear thing to do. */
-export function renderLanding({ busy, error, onStart }) {
+export function renderLanding({ busy, error, realAccount, onStart }) {
   return h(
     'main',
     { class: 'landing' },
@@ -30,6 +30,13 @@ export function renderLanding({ busy, error, onStart }) {
       busy ? 'Setting up your sandbox…' : 'Start the live demo',
     ),
     error ? h('p', { class: 'form-error', role: 'alert' }, error) : null,
+    realAccount
+      ? h(
+          'p',
+          { class: 'notice' },
+          'You are signed in to a real account in this browser. The demo is a separate sandbox, so starting it signs you out of that account here.',
+        )
+      : null,
     h(
       'ul',
       { class: 'promises' },
@@ -214,33 +221,37 @@ export function renderInvoices({
                   h('td', { class: 'due' }, dueText(invoice, now)),
                   h(
                     'td',
-                    { class: 'row-actions' },
+                    null,
                     h(
-                      'button',
-                      {
-                        type: 'button',
-                        disabled: busy,
-                        onClick: () => onSend(invoice),
-                      },
-                      'Send',
-                    ),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        disabled: busy,
-                        onClick: () => onPay(invoice),
-                      },
-                      'Mark paid',
-                    ),
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        disabled: busy,
-                        onClick: () => onVoid(invoice),
-                      },
-                      'Void',
+                      'div',
+                      { class: 'row-actions' },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          disabled: busy,
+                          onClick: () => onSend(invoice),
+                        },
+                        'Send',
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          disabled: busy,
+                          onClick: () => onPay(invoice),
+                        },
+                        'Mark paid',
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          disabled: busy,
+                          onClick: () => onVoid(invoice),
+                        },
+                        'Void',
+                      ),
                     ),
                   ),
                 ),

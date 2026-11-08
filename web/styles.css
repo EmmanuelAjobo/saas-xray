@@ -164,6 +164,14 @@ a.link {
   border-radius: 8px;
 }
 
+.notice {
+  color: var(--warn);
+  background: var(--warn-bg);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
 .small {
   color: var(--muted);
   font-size: 13px;

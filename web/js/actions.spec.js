@@ -3,6 +3,7 @@ import {
   createInvoice,
   payADraft,
   peekAsStranger,
+  returningVisitor,
   sampleInvoice,
   sendInvoice,
   attempt,
@@ -256,5 +257,20 @@ describe('peekAsStranger', () => {
       },
     );
     expect((await peekAsStranger(api, 'org-1')).tone).toBe('error');
+  });
+});
+
+describe('returningVisitor', () => {
+  it('walks a demo sandbox straight back in', () => {
+    expect(returningVisitor({ isDemo: true })).toBe('demo');
+  });
+  it('does NOT treat a real account as a demo (its company is not a sandbox)', () => {
+    expect(returningVisitor({ isDemo: false })).toBe('real');
+  });
+  it('treats a user whose type is unknown as real, never as a demo', () => {
+    expect(returningVisitor({})).toBe('real');
+  });
+  it('knows when nobody is signed in', () => {
+    expect(returningVisitor(undefined)).toBe('nobody');
   });
 });

@@ -192,3 +192,16 @@ export async function peekAsStranger(api, orgId) {
     });
   }
 }
+
+/**
+ * What to do with someone who arrives already signed in (their refresh cookie still works).
+ * A demo sandbox is walked straight back in to. A REAL account is not: its company is not a
+ * demo (roles cannot be switched, "peek" makes no sense), so the page shows the landing page
+ * instead and leaves their session alone.
+ * @param {{ isDemo?: boolean } | undefined} user
+ * @returns {'demo' | 'real' | 'nobody'}
+ */
+export function returningVisitor(user) {
+  if (!user) return 'nobody';
+  return user.isDemo === true ? 'demo' : 'real';
+}

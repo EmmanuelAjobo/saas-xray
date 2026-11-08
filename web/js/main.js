@@ -4,6 +4,7 @@ import {
   payADraft,
   payInvoice,
   peekAsStranger,
+  returningVisitor,
   sendInvoice,
   voidInvoice,
 } from './actions.js';
@@ -33,6 +34,7 @@ const state = {
   phase: 'boot', // boot | landing | app
   starting: false,
   startError: '',
+  realAccount: false,
   busy: false,
   org: /** @type {{ id: string, name: string } | undefined} */ (undefined),
   role: 'OWNER',
@@ -150,6 +152,7 @@ function draw() {
       renderLanding({
         busy: state.starting,
         error: state.startError,
+        realAccount: state.realAccount,
         onStart: startDemo,
       }),
     );
@@ -306,11 +309,17 @@ async function leave() {
 async function boot() {
   draw();
   // A visitor who comes back within the sandbox's life is still signed in through the
-  // refresh cookie, so they land straight in their own company.
+  // refresh cookie, so they land straight in their own company. Only a DEMO sandbox, though:
+  // a real account's company is not a demo (roles cannot be switched, "peek" makes no sense),
+  // so it is left alone, not shown.
   try {
     if (await api.refresh()) {
-      await enter();
-      return;
+      if (returningVisitor(api.user) === 'demo') {
+        await enter();
+        return;
+      }
+      state.realAccount = true;
+      api.setToken(undefined); // forget it in this page only; the cookie is untouched
     }
   } catch (error) {
     console.error(error);
