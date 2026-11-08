@@ -44,7 +44,7 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
 | Demo page + X-ray panel         |   ✅   | One click into a sandbox; invoices, role switching, "try to break it" buttons, and the live X-ray timeline beside them             |
 
-Tests at this point: **1,166** (640 unit, 56 HTTP, 470 integration against real Postgres and Redis).
+Tests at this point: **1,174** (648 unit, 56 HTTP, 470 integration against real Postgres and Redis).
 
 ## Engineering highlights
 
