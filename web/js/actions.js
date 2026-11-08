@@ -109,6 +109,10 @@ export function voidInvoice(api, orgId, invoice) {
 /**
  * "Pay a draft": the invoice rules live on the server, so even a button that asks for the
  * impossible gets a clear refusal. Uses an existing draft, or makes one first.
+ *
+ * The list on screen can be out of date (another tab, a click a moment ago), so the draft's
+ * REAL status is checked just before paying; if it is no longer a draft, a fresh one is made.
+ * Otherwise a perfectly legal payment would be reported as the server failing.
  * @param {Api} api
  * @param {string} orgId
  * @param {Array<{ id: string, number: string, status: string }>} invoices
@@ -117,17 +121,25 @@ export function voidInvoice(api, orgId, invoice) {
 export function payADraft(api, orgId, invoices, clientId) {
   return attempt(async () => {
     let draft = invoices.find((invoice) => invoice.status === 'DRAFT');
+    if (draft) {
+      const current = await api.request(
+        'GET',
+        `/v1/orgs/${orgId}/invoices/${draft.id}`,
+      );
+      if (current.status !== 'DRAFT') draft = undefined;
+    }
     if (!draft) {
-      if (!clientId)
+      if (!clientId) {
         throw new ApiError(409, {
           detail: 'There is no client to invoice yet.',
         });
+      }
       draft = await api.request('POST', `/v1/orgs/${orgId}/invoices`, {
         body: { clientId },
       });
     }
     await api.request('POST', `/v1/orgs/${orgId}/invoices/${draft?.id}/pay`);
-    return 'The server paid a draft invoice. That should not be possible; please report it.';
+    return 'The server paid an invoice that was still a draft. That should not be possible; please report it.';
   });
 }
 

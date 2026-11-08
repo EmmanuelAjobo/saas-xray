@@ -121,15 +121,19 @@ describe('creating and sending', () => {
 });
 
 describe('payADraft', () => {
-  it('pays an existing draft and reports the server’s refusal', async () => {
-    const api = fakeApi((method, path) =>
-      path.endsWith('/pay')
-        ? refused(
-            409,
-            'Only SENT or OVERDUE invoices can be marked paid (this invoice is DRAFT)',
-          )
-        : {},
-    );
+  const REFUSAL =
+    'Only SENT or OVERDUE invoices can be marked paid (this invoice is DRAFT)';
+
+  /** Answers GET with the invoice's current status, creates drafts, and refuses payment. */
+  const server = ({ currentStatus = 'DRAFT' } = {}) =>
+    fakeApi((method, path) => {
+      if (method === 'GET') return { id: 'draft-1', status: currentStatus };
+      if (path.endsWith('/pay')) return refused(409, REFUSAL);
+      return { id: 'new-draft' };
+    });
+
+  it('checks the draft is STILL a draft, then pays it and reports the server’s refusal', async () => {
+    const api = server();
     const outcome = await payADraft(
       api,
       'org-1',
@@ -139,26 +143,44 @@ describe('payADraft', () => {
       ],
       'client-1',
     );
-    expect(api.calls).toHaveLength(1);
-    expect(api.calls[0].path).toBe('/v1/orgs/org-1/invoices/draft-1/pay');
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'GET /v1/orgs/org-1/invoices/draft-1',
+      'POST /v1/orgs/org-1/invoices/draft-1/pay',
+    ]);
     expect(outcome).toMatchObject({ tone: 'refused' });
     expect(outcome.text).toContain('(this invoice is DRAFT)');
   });
 
-  it('makes a draft first when there is none', async () => {
-    const api = fakeApi((method, path) => {
-      if (path.endsWith('/pay')) return refused(409, 'nope');
-      return { id: 'new-draft' };
-    });
+  it('does not trust an out-of-date list: a "draft" that was sent a moment ago is replaced by a fresh one', async () => {
+    // The screen still lists INV-2 as a draft, but it has since been sent.
+    const api = server({ currentStatus: 'SENT' });
+    const outcome = await payADraft(
+      api,
+      'org-1',
+      [{ id: 'draft-1', number: 'INV-2', status: 'DRAFT' }],
+      'client-1',
+    );
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'GET /v1/orgs/org-1/invoices/draft-1',
+      'POST /v1/orgs/org-1/invoices',
+      'POST /v1/orgs/org-1/invoices/new-draft/pay',
+    ]);
+    // It never paid the invoice that really had been sent.
+    expect(api.calls.some((c) => c.path.includes('/draft-1/pay'))).toBe(false);
+    expect(outcome.tone).toBe('refused');
+  });
+
+  it('makes a draft first when the list has none', async () => {
+    const api = server();
     await payADraft(
       api,
       'org-1',
       [{ id: 'a', number: 'INV-1', status: 'PAID' }],
       'client-1',
     );
-    expect(api.calls.map((c) => c.path)).toEqual([
-      '/v1/orgs/org-1/invoices',
-      '/v1/orgs/org-1/invoices/new-draft/pay',
+    expect(api.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'POST /v1/orgs/org-1/invoices',
+      'POST /v1/orgs/org-1/invoices/new-draft/pay',
     ]);
   });
 
@@ -169,8 +191,10 @@ describe('payADraft', () => {
     expect(outcome.tone).toBe('refused');
   });
 
-  it('flags it loudly if the server ever DID pay a draft', async () => {
-    const api = fakeApi(() => ({}));
+  it('flags it loudly if the server ever DID pay a verified draft', async () => {
+    const api = fakeApi((method) =>
+      method === 'GET' ? { id: 'd', status: 'DRAFT' } : {},
+    );
     const outcome = await payADraft(
       api,
       'org-1',
