@@ -33,6 +33,7 @@ const EXPECTED: Record<Permission, Role[]> = {
   'invoice:update': ['OWNER', 'ADMIN'],
   'invoice:send': ['OWNER', 'ADMIN'],
   'invoice:void': ['OWNER', 'ADMIN'],
+  'xray:read': ['OWNER', 'ADMIN', 'MEMBER'],
   'audit:read': ['OWNER', 'ADMIN'],
   'report:generate': ['OWNER', 'ADMIN', 'MEMBER'],
 };

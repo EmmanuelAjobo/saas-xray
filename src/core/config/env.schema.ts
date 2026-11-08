@@ -223,6 +223,28 @@ const baseSchema = z.object({
 
   /** How long a "Try the demo" sandbox lives before it is deleted. */
   DEMO_TTL_HOURS: intSetting(24, 1, 168),
+
+  /** The Backend X-ray (a live record of what the backend does per request). false = off. */
+  XRAY_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /** Most events kept per organisation; older ones are dropped. */
+  XRAY_BUFFER_SIZE: intSetting(200, 10, 2_000),
+  /** An organisation's events expire this long after its last activity. */
+  XRAY_BUFFER_TTL_SECONDS: intSetting(3_600, 60, 86_400),
+  /** Events returned when a client asks for history without saying how many. */
+  XRAY_REPLAY_DEFAULT: intSetting(50, 1, 2_000),
+  /** A live stream sends a keep-alive this often so proxies do not close it as idle. */
+  XRAY_HEARTBEAT_SECONDS: intSetting(15, 1, 60),
+  /**
+   * A live stream is closed after this long and the client reconnects. Permission and
+   * membership are checked at connect time, so this bounds how long a removed member could
+   * keep watching.
+   */
+  XRAY_STREAM_MAX_SECONDS: intSetting(600, 30, 3_600),
+  /** Live streams one user may hold open at once (each one holds a connection). */
+  XRAY_MAX_STREAMS_PER_USER: intSetting(3, 1, 20),
 });
 
 export const envSchema = baseSchema.superRefine((env, ctx) => {
@@ -248,6 +270,13 @@ export const envSchema = baseSchema.superRefine((env, ctx) => {
       code: 'custom',
       path: ['PAGE_SIZE_DEFAULT'],
       message: 'must not be larger than PAGE_SIZE_MAX',
+    });
+  }
+  if (env.XRAY_REPLAY_DEFAULT > env.XRAY_BUFFER_SIZE) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['XRAY_REPLAY_DEFAULT'],
+      message: 'must not be larger than XRAY_BUFFER_SIZE',
     });
   }
   if (env.PRO_PLAN_MAX_SEATS < env.FREE_PLAN_MAX_SEATS) {

@@ -8,6 +8,8 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { ForbiddenError } from '../../common/errors/domain-errors.js';
 import type { RequestTenant } from '../../core/context/request-context.service.js';
+import { authCheckEvent } from '../../core/xray/xray.events.js';
+import { recordXrayStep } from '../../core/xray/xray.trace.js';
 import { type Permission, can } from './permissions.js';
 import { REQUIRED_PERMISSION_KEY } from './require-permission.decorator.js';
 
@@ -44,7 +46,18 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const tenant = request.tenant;
-    if (!tenant || !can(tenant.role, required)) {
+    const allowed = tenant !== undefined && can(tenant.role, required);
+    if (tenant) {
+      recordXrayStep(
+        authCheckEvent({
+          ts: Date.now(),
+          role: tenant.role,
+          permission: required,
+          allowed,
+        }),
+      );
+    }
+    if (!allowed) {
       throw new ForbiddenError('You do not have permission to do this.');
     }
     return true;

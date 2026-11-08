@@ -20,6 +20,8 @@ import type { RequestTenant } from '../../core/context/request-context.service.j
 import { MailService } from '../../core/mail/mail.service.js';
 import { invoiceSentTemplate } from '../../core/mail/templates.js';
 import { TenantPrismaService } from '../../core/prisma/tenant-prisma.service.js';
+import { emailEvent } from '../../core/xray/xray.events.js';
+import { recordXrayStep } from '../../core/xray/xray.trace.js';
 import type { InvoiceStatus } from '../../generated/prisma/client.js';
 import type {
   CreateInvoiceDto,
@@ -404,10 +406,16 @@ export class InvoicesService {
     const org = await this.db.organization.findFirst({
       select: { name: true, isDemo: true },
     });
-    if (!org || org.isDemo) return;
+    if (!org) return;
+    if (org.isDemo) {
+      recordXrayStep(
+        emailEvent({ ts: Date.now(), template: 'invoice-sent', sent: false }),
+      );
+      return;
+    }
     const amount = formatMoney(invoice.totalCents, invoice.currency);
-    this.background.run('invoice-sent-email', () =>
-      this.mail.send({
+    this.background.run('invoice-sent-email', async () => {
+      await this.mail.send({
         to: invoice.client.email,
         ...invoiceSentTemplate({
           organizationName: org.name,
@@ -416,7 +424,11 @@ export class InvoicesService {
           amount,
           dueDate: (invoice.dueDate ?? new Date()).toISOString().slice(0, 10),
         }),
-      }),
-    );
+      });
+      // Only reached when delivery succeeded (a failure throws and is logged instead).
+      recordXrayStep(
+        emailEvent({ ts: Date.now(), template: 'invoice-sent', sent: true }),
+      );
+    });
   }
 }

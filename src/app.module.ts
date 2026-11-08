@@ -9,6 +9,7 @@ import { MailModule } from './core/mail/mail.module.js';
 import { PrismaModule } from './core/prisma/prisma.module.js';
 import { RateLimitModule } from './core/rate-limit/rate-limit.module.js';
 import { RedisModule } from './core/redis/redis.module.js';
+import { XrayCoreModule } from './core/xray/xray.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ClientsModule } from './modules/clients/clients.module.js';
 import { DemoModule } from './modules/demo/demo.module.js';
@@ -18,6 +19,7 @@ import { MembershipsModule } from './modules/memberships/memberships.module.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { TasksModule } from './modules/tasks/tasks.module.js';
 import { TenancyModule } from './modules/tenancy/tenancy.module.js';
+import { XrayModule } from './modules/xray/xray.module.js';
 
 @Module({
   imports: [
@@ -29,6 +31,7 @@ import { TenancyModule } from './modules/tenancy/tenancy.module.js';
     RedisModule,
     BackgroundModule,
     MailModule,
+    XrayCoreModule,
     // Request pipeline: error filter, validation, timeout.
     CommonModule,
     // Guards run in this order: rate limit first (cheap rejection), then authentication.
@@ -45,6 +48,7 @@ import { TenancyModule } from './modules/tenancy/tenancy.module.js';
     ClientsModule,
     TasksModule,
     InvoicesModule,
+    XrayModule,
     HealthModule,
   ],
 })

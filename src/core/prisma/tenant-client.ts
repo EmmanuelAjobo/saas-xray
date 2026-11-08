@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { PrismaClient } from '../../generated/prisma/client.js';
+import { recordDatabaseQuery } from '../xray/xray.trace.js';
 import {
   TenantContextMissingError,
   TenantViolationError,
@@ -97,7 +98,13 @@ export function createTenantClient(
             operation,
             scoped,
           );
-          return query(scoped as typeof args);
+          // Timed for the X-ray (counted per request, never logged with its arguments).
+          const started = performance.now();
+          try {
+            return await query(scoped as typeof args);
+          } finally {
+            recordDatabaseQuery(name, performance.now() - started);
+          }
         },
       },
     },

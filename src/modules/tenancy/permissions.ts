@@ -40,6 +40,11 @@ export const PERMISSION_ROLES = {
   'invoice:send': MANAGERS,
   'invoice:void': MANAGERS,
 
+  // The Backend X-ray. Every role may OPEN it; the reader service then lets only managers
+  // see a real organisation's events (a demo sandbox is private to its visitor, so all
+  // personas may).
+  'xray:read': EVERYONE,
+
   // Oversight and reporting
   'audit:read': MANAGERS,
   'report:generate': EVERYONE,

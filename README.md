@@ -4,7 +4,7 @@
 
 This is a portfolio project, built in public, milestone by milestone. The design, with diagrams and the reasoning behind each decision, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> **Last updated:** after Milestone 7 (the "Try demo" button). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+> **Last updated:** after Milestone 8 (the Backend X-ray, API side). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
 
 ## Contents
 
@@ -39,10 +39,12 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | Tenant data layer               |   ✅   | A second line of defence: every database query is confined to the current organisation, and cross-organisation links are refused |
 | Clients, tasks, invoices        |   ✅   | CRUD with paging and search; invoice numbering, money in cents, and a state machine (DRAFT → SENT → PAID / VOID)                 |
 | "Try demo" button               |   ✅   | One click, no sign-up: a private, fully populated sandbox per visitor, role switching, bot protection, auto-cleanup              |
+| Deploy                          |   ✅   | Docker image, migrations on start, CI, live on Railway ([guide](docs/DEPLOY-RAILWAY.md))                                         |
+| Backend X-ray (API)             |   ✅   | Every request leaves a plain-English trail (membership, permission, database, answer), as history and a live stream             |
 | Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
-| X-ray panel                     |   ⏳   | Planned                                                                                                                          |
+| X-ray panel (screen)            |   ⏳   | Planned: the visual timeline that reads the X-ray API                                                                            |
 
-Tests at this point: **899** (423 unit, 47 HTTP, 429 integration against real Postgres and Redis).
+Tests at this point: **1,052** (537 unit, 47 HTTP, 468 integration against real Postgres and Redis).
 
 ## Engineering highlights
 
@@ -240,6 +242,35 @@ How the numbers stay right: money is whole **cents** in 32-bit integers (a total
 
 **Lists** use cursor (keyset) paging: `{ data, nextCursor }`. Unlike offsets, rows added or deleted between requests never cause duplicates or skips. Page size defaults to `PAGE_SIZE_DEFAULT` and is capped by `PAGE_SIZE_MAX`. Searches treat `%` and `_` as ordinary characters.
 
+### Backend X-ray (`/v1/orgs/:orgId/xray`)
+
+The backend narrates itself. Each request under an organisation leaves a few events that share one `requestId`:
+
+| Event          | Says                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `tenant.check` | You belong to this organisation as OWNER (read fresh from the database on every request)    |
+| `auth.check`   | Role MEMBER does not hold `client:write`: refused before any data was touched               |
+| `db.queries`   | 3 database queries in 12 ms, each confined to this organisation                             |
+| `http.request` | `POST /invoices/:id/send` answered 200 in 84 ms (or the refusal, with its reason)           |
+| `email.sent`   | The email went out after the response, linked to the click that caused it (or `email.skipped` in a demo) |
+
+| Endpoint            | Who                                                  | What it does                                                                                      |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `GET /xray/events`  | demo: any role. Real organisation: owner, admin      | The latest events, oldest first, with a `cursor`. Poll with `?after=<cursor>`; `?limit=` optional |
+| `GET /xray/stream`  | same                                                 | Server-Sent Events: recent history, then each event live, plus a `heartbeat`. Resume with `Last-Event-ID` |
+
+How it stays safe:
+
+- **Only a verified member's organisation ever receives an event.** The organisation comes from the tenant guard's membership check, never from the URL. A stranger poking at someone else's organisation (a 404) leaves no trace in either stream.
+- **Nothing sensitive can be in an event.** Events are built only by typed builders: routes are templates (`/invoices/:id/send`), never real URLs; there are no request bodies, headers, tokens, emails, names or ids. A test scans every event for them.
+- **It cannot break a request.** Events are collected during the request and published afterwards, fire-and-forget; if Redis is down they are dropped and one warning is logged. `XRAY_ENABLED=false` switches it off.
+- **Bounded everywhere:** history per organisation (`XRAY_BUFFER_SIZE`) and its expiry (`XRAY_BUFFER_TTL_SECONDS`), live streams per user (`XRAY_MAX_STREAMS_PER_USER`), and stream lifetime (`XRAY_STREAM_MAX_SECONDS`, after which the client reconnects and permission is checked again, so a removed member cannot keep watching).
+- **Works across servers:** history lives in a capped Redis Stream and live delivery uses Redis pub/sub, so any API instance can serve any viewer.
+
+Browsers cannot send an `Authorization` header from `EventSource`, so read the stream with `fetch` and a streaming reader. In Swagger, use `GET /xray/events` (the stream stays open).
+
+Not yet recorded (they arrive with their features): cache hits, background jobs, webhooks, rate-limit blocks. Rate-limit blocks cannot honestly be attributed to an organisation today, because the rate limiter runs before the caller is verified; showing them is planned with the job queue.
+
 More endpoints are documented in Swagger as they are added.
 
 ## Configuration
@@ -250,6 +281,7 @@ Nothing that is sensitive or tunable is hard-coded. Every setting is read from t
 - **Security policy:** link lifetimes (`EMAIL_VERIFY_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`), session lengths, password-hashing cost (`PASSWORD_HASH_*`), and every rate limit (`RATE_LIMIT_*`).
 - **Timeouts and retries:** database, mail, health checks, Redis, CORS cache.
 - **Ports and the demo** (`DEMO_ENABLED`, `DEMO_TTL_HOURS`, `DEMO_MAX_ACTIVE`, `DEMO_PURGE_*`, `TURNSTILE_SECRET_KEY`).
+- **The X-ray** (`XRAY_ENABLED`, `XRAY_BUFFER_SIZE`, `XRAY_BUFFER_TTL_SECONDS`, `XRAY_REPLAY_DEFAULT`, `XRAY_HEARTBEAT_SECONDS`, `XRAY_STREAM_MAX_SECONDS`, `XRAY_MAX_STREAMS_PER_USER`).
 
 Numbers that are _not_ settings stay in code, named, with a comment: time units (`src/common/time.ts`), limits that come from a standard or the API contract such as the 254-character email maximum and the password length bounds (`src/common/limits.ts`), and hard safety bounds on untrusted input (`src/core/config/security-limits.ts`). Changing those changes what clients may send, so they go through code review rather than a deploy setting.
 
@@ -339,6 +371,8 @@ docker compose -f docker-compose.prod.yml down -v                # remove it and
 
 Every other setting has a default; the full list is in [.env.example](.env.example). Use the platform's health check on `/health/ready`. Set `RUN_MIGRATIONS=false` if the platform runs `npm run db:migrate:deploy` as its own release step.
 
+A step-by-step for Railway, including every variable to set and how to check it works, is in [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
+
 **Domain note:** the refresh token is a `SameSite=Lax` cookie. The API and the web app must share a registrable domain (for example `api.example.com` and `app.example.com`), or sign-in will not persist in browsers that block third-party cookies.
 
 **CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request: Prisma schema validation, formatting, typecheck, lint, all three test layers against Postgres and Redis service containers, and a second job that builds this image and boots it on a fresh database. A change that breaks the image or a migration fails the build.
@@ -372,6 +406,7 @@ src/
 │   ├── mail/             SMTP and Resend transports, email templates
 │   ├── background/       fire-and-forget work (moves to a queue in Milestone 10)
 │   ├── rate-limit/       Redis-backed limiter and named policies
+│   ├── xray/             the X-ray plumbing: trace per request, Redis Streams store, publisher
 │   └── health/
 ├── common/               error filter, validation pipe, timeout interceptor, domain errors
 ├── modules/
@@ -382,6 +417,7 @@ src/
 │   ├── invitations/      invite, resend, revoke, preview, accept
 │   ├── clients/  tasks/  invoices/   the product domain (tenant-scoped client only)
 │   ├── demo/             sandbox creation, role switching, expiry cleanup, captcha
+│   ├── xray/             the X-ray endpoints: history and live stream
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations
@@ -416,7 +452,7 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 - ✅ Clients, tasks and invoices, with the invoice state machine
 - ⏳ Invoice `Idempotency-Key` header and the overdue job (arrives with the job queue)
 - ✅ "Try demo" endpoint, role switching, sandbox cleanup
-- 🟡 Deploy: production image, migrations on start and CI are done and verified; going live needs a hosting account and a domain
+- ✅ Deploy: production image, migrations on start, CI, live on Railway. A custom domain and verified email sender are still to do
 
 **Phase 2: SaaS platform**
 
@@ -427,10 +463,11 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 
 **Phase 3: show-off and quality**
 
-- ⏳ The Backend X-ray panel
+- ✅ The Backend X-ray API: events, history and live stream (more event kinds arrive with jobs, cache and webhooks)
+- ⏳ The X-ray panel (the screen that reads the API)
 - ⏳ Audit log
 - ✅ Tenant-isolation test suite
-- ⏳ GitHub Actions CI
+- ✅ GitHub Actions CI
 - ⏳ Demo video and case study
 
 ## Troubleshooting

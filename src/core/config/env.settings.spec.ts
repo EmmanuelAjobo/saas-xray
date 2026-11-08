@@ -40,6 +40,13 @@ describe('tunable settings', () => {
       HEALTH_CHECK_TIMEOUT_MS: 2_000,
       CORS_MAX_AGE_SECONDS: 600,
       DEMO_TTL_HOURS: 24,
+      XRAY_ENABLED: true,
+      XRAY_BUFFER_SIZE: 200,
+      XRAY_BUFFER_TTL_SECONDS: 3_600,
+      XRAY_REPLAY_DEFAULT: 50,
+      XRAY_HEARTBEAT_SECONDS: 15,
+      XRAY_STREAM_MAX_SECONDS: 600,
+      XRAY_MAX_STREAMS_PER_USER: 3,
       MAX_ORGS_PER_USER: 5,
       RATE_LIMIT_ORG_CREATE_PER_HOUR: 10,
       INVITATION_TTL_DAYS: 7,
@@ -91,6 +98,16 @@ describe('tunable settings', () => {
     ['INVOICE_DEFAULT_TERMS_DAYS', '0'],
     ['INVOICE_MAX_LINE_ITEMS', '0'],
     ['DATABASE_POOL_MAX', '0'],
+    ['XRAY_ENABLED', 'yes'],
+    ['XRAY_BUFFER_SIZE', '5'],
+    ['XRAY_BUFFER_SIZE', '999999'],
+    ['XRAY_BUFFER_TTL_SECONDS', '1'],
+    ['XRAY_REPLAY_DEFAULT', '0'],
+    ['XRAY_HEARTBEAT_SECONDS', '0'],
+    ['XRAY_HEARTBEAT_SECONDS', '600'],
+    ['XRAY_STREAM_MAX_SECONDS', '1'],
+    ['XRAY_MAX_STREAMS_PER_USER', '0'],
+    ['XRAY_MAX_STREAMS_PER_USER', '500'],
     ['INVITATION_TTL_DAYS', '0'],
     ['INVITATION_TTL_DAYS', '365'],
     ['FREE_PLAN_MAX_SEATS', '0'],
@@ -123,6 +140,19 @@ describe('tunable settings', () => {
         PRO_PLAN_MAX_SEATS: '10',
       }).PRO_PLAN_MAX_SEATS,
     ).toBe(10);
+  });
+
+  it('refuses an X-ray history default larger than the buffer, and parses XRAY_ENABLED as a boolean', () => {
+    expect(() =>
+      validateEnv({
+        ...valid,
+        XRAY_REPLAY_DEFAULT: '300',
+        XRAY_BUFFER_SIZE: '200',
+      }),
+    ).toThrow('XRAY_REPLAY_DEFAULT');
+    expect(validateEnv({ ...valid, XRAY_ENABLED: 'false' }).XRAY_ENABLED).toBe(
+      false,
+    );
   });
 
   it('parses DEMO_ENABLED as a real boolean, and allows 0 to turn the purge timer off', () => {

@@ -12,6 +12,8 @@ import { PrismaService } from '../../src/core/prisma/prisma.service.js';
 import { TenantPrismaService } from '../../src/core/prisma/tenant-prisma.service.js';
 import { RedisThrottlerStorage } from '../../src/core/rate-limit/redis-throttler.storage.js';
 import { RedisService } from '../../src/core/redis/redis.service.js';
+import { MemoryXrayStore } from '../../src/core/xray/memory-xray.store.js';
+import { XRAY_STORE } from '../../src/core/xray/xray.store.js';
 import { FakeMailTransport } from './fake-mail.js';
 import { ProbeController } from './probe.controller.js';
 import { TenantProbeController } from './tenant-probe.controller.js';
@@ -75,7 +77,10 @@ export async function createTestApp({
       .overrideProvider(RedisThrottlerStorage)
       .useValue(new ThrottlerStorageService())
       .overrideProvider(MAIL_TRANSPORT)
-      .useValue(mail);
+      .useValue(mail)
+      // X-ray events kept in memory: tests of the layers above need no Redis streams.
+      .overrideProvider(XRAY_STORE)
+      .useClass(MemoryXrayStore);
     if (!realDatabase) {
       builder = builder
         .overrideProvider(PrismaService)

@@ -704,6 +704,16 @@ export interface XrayEvent {
   - *Load dashboard twice* → miss then hit.
   - *Fail a job* → watch retries with backoff, then dead-letter.
 
+> **As built (Milestone 8, API side).** Implemented as designed, with these decisions and differences:
+> - **Redis Streams, not a list.** History is a capped Redis Stream per organisation (`XADD ... MAXLEN =`, plus an expiry), so every event has an ordered id and a reconnecting client can resume exactly (`Last-Event-ID`). Live delivery is pub/sub on `xray:live:{orgId}`, one shared subscriber connection per process, subscribed only while someone is watching.
+> - **SSE and polling, not Socket.IO yet.** `GET /v1/orgs/:orgId/xray/events` (history, with a cursor, works in Swagger) and `GET /v1/orgs/:orgId/xray/stream` (Server-Sent Events). The WebSocket gateway arrives with real-time notifications; the event contract does not change.
+> - **One publish per request.** Steps are collected in a per-request trace (AsyncLocalStorage) and published once the response is sent, in one pipeline. Late work (the invoice email) joins the same `requestId`.
+> - **Attribution is by verified membership only.** Events go to the organisation set by the tenant guard, never one taken from the URL, so a non-member's request (404) leaves no event anywhere.
+> - **Privacy by construction.** Events come only from typed builders (`xray.events.ts`): routes are templates, meta values are flat primitives, no bodies, headers, tokens or personal data.
+> - **Who may watch.** Demo sandboxes: every role. Real organisations: owners and admins (reuses `audit:read`).
+> - **Kinds built:** `http.request`, `tenant.check`, `auth.check`, `db.queries` (one summary per request, from the tenant data layer), `email.sent`, `email.skipped`. **Not yet:** cache, job, webhook, websocket and audit events (they arrive with those features), and `ratelimit.blocked`: the rate limiter runs before the caller is verified, so a block cannot honestly be attributed to an organisation until rate limiting for tenant routes moves after membership.
+> - **Safety:** `XRAY_ENABLED` kill switch, bounded history, per-user stream cap, stream lifetime cap (re-checks permission on reconnect), the live stream is exempt from the request timeout (`@SkipTimeout()`) but bounds itself, and X-ray failures are logged and swallowed.
+
 ### 17.5 Why this design
 - Uses real hooks in the real code path, not fake animations — it's honest and you can open the code on a call.
 - Redis pub/sub is the simplest thing that works across two processes; at scale you'd swap it for OpenTelemetry traces (mention as evolution).
