@@ -8,6 +8,9 @@ import { REQUIRED_PERMISSION_KEY } from './modules/tenancy/require-permission.de
 
 const SRC = join(process.cwd(), 'src');
 
+/** Time allowed for one controller's cold import (see the comment where it is used). */
+const IMPORT_TIMEOUT_MS = 30_000;
+
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -92,5 +95,9 @@ describe('architecture: every route under /orgs/:orgId declares the permission i
         }
       }
     },
+    // The first import of a controller loads its whole dependency graph (the auth controller
+    // pulls in the login stack). That is slow on a busy machine or a small CI runner, and
+    // is not what this test is checking, so it gets room to import.
+    IMPORT_TIMEOUT_MS,
   );
 });

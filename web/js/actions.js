@@ -86,7 +86,7 @@ export function createInvoice(api, orgId, clientId, n) {
 export function sendInvoice(api, orgId, invoice) {
   return attempt(async () => {
     await api.request('POST', `/v1/orgs/${orgId}/invoices/${invoice.id}/send`);
-    return `${invoice.number} sent. In a demo sandbox no real email goes out; the X-ray says so.`;
+    return `${invoice.number} sent. In a demo sandbox no real email goes out; the email appears in your Outbox instead.`;
   });
 }
 

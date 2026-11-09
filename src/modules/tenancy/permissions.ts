@@ -45,6 +45,9 @@ export const PERMISSION_ROLES = {
   // personas may).
   'xray:read': EVERYONE,
 
+  // The demo Outbox (demo sandboxes only; the service answers 404 for a real organisation).
+  'outbox:read': EVERYONE,
+
   // Oversight and reporting
   'audit:read': MANAGERS,
   'report:generate': EVERYONE,

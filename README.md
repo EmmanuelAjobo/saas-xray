@@ -4,7 +4,7 @@
 
 This is a portfolio project, built in public, milestone by milestone. The design, with diagrams and the reasoning behind each decision, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> **Last updated:** after Milestone 9 (the demo page with the live X-ray panel). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+> **Last updated:** after Milestone 10 (the demo Outbox: see the email a client would receive). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
 
 ## Contents
 
@@ -42,9 +42,10 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | Deploy                          |   ✅   | Docker image, migrations on start, CI, live on Railway ([guide](docs/DEPLOY-RAILWAY.md))                                         |
 | Backend X-ray (API)             |   ✅   | Every request leaves a plain-English trail (membership, permission, database, answer), as history and a live stream             |
 | Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
+| Demo Outbox                     |   ✅   | A demo sandbox never sends real email; the email it would have sent is captured and shown on the page, newest first                |
 | Demo page + X-ray panel         |   ✅   | One click into a sandbox; invoices, role switching, "try to break it" buttons, and the live X-ray timeline beside them             |
 
-Tests at this point: **1,174** (648 unit, 56 HTTP, 470 integration against real Postgres and Redis).
+Tests at this point: **1,206** (664 unit, 56 HTTP, 486 integration against real Postgres and Redis).
 
 ## Engineering highlights
 
@@ -118,6 +119,7 @@ Postgres is exposed on **5433**, not the default 5432, so it cannot clash with a
 - **Mark paid** on a draft, or **Try it** under "Pay an invoice that was never sent": the server refuses with a 409 and says why.
 - Switch the role at the top to **Member** and create a client: refused (403), and the X-ray shows exactly which permission was missing.
 - **Peek at another company**: a stranger's sandbox asks for your data and gets a 404. Nothing appears in your X-ray, because strangers leave no trace.
+- Click **Send** on a draft: the email your client would have received appears in the **Outbox** (nothing is really sent), and the X-ray card says it was captured.
 - Flip the X-ray between **Plain English** and **Developer** to see ids, timings and the raw facts.
 
 **In Swagger** (<http://localhost:3000/docs>): call `POST /v1/auth/register`, copy the `accessToken` from the response, click **Authorize** and paste it. Then call `GET /v1/auth/me`. The verification email appears in Mailpit.
@@ -250,6 +252,16 @@ How the numbers stay right: money is whole **cents** in 32-bit integers (a total
 
 **Lists** use cursor (keyset) paging: `{ data, nextCursor }`. Unlike offsets, rows added or deleted between requests never cause duplicates or skips. Page size defaults to `PAGE_SIZE_DEFAULT` and is capped by `PAGE_SIZE_MAX`. Searches treat `%` and `_` as ordinary characters.
 
+### Demo Outbox (`/v1/orgs/:orgId/outbox`)
+
+Demo sandboxes never send real email (anyone can click the demo button). Instead, when a sandbox "sends" an invoice, the email that would have gone out is captured and shown, so a visitor sees what their client would have received with no mail provider involved.
+
+| Endpoint      | Who                             | What it does                                                                                   |
+| ------------- | ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /outbox` | any role in a **demo** sandbox  | The captured emails, newest first: `{ data: [{ id, ts, to, subject, text }] }`. A real organisation gets 404: its email is delivered for real |
+
+How it stays safe: it is only ever the caller's own organisation (the verified tenant, never the URL); a stranger's request is the same 404 as for an organisation that does not exist; at most `OUTBOX_MAX_MESSAGES` are kept (older ones drop) and they expire with the sandbox; subject and body are length-capped; the body is plain text and the page shows it as text, never as HTML; and capturing can never fail the invoice that was just sent. The recipient address appears only here, never in the X-ray.
+
 ### Backend X-ray (`/v1/orgs/:orgId/xray`)
 
 The backend narrates itself. Each request under an organisation leaves a few events that share one `requestId`:
@@ -260,7 +272,7 @@ The backend narrates itself. Each request under an organisation leaves a few eve
 | `auth.check`   | Role MEMBER does not hold `client:write`: refused before any data was touched               |
 | `db.queries`   | 3 database queries in 12 ms, each confined to this organisation                             |
 | `http.request` | `POST /invoices/:id/send` answered 200 in 84 ms (or the refusal, with its reason)           |
-| `email.sent`   | The email went out after the response, linked to the click that caused it (or `email.skipped` in a demo) |
+| `email.sent`   | The email went out after the response, linked to the click that caused it (or `email.captured` in a demo: kept in the sandbox's Outbox instead) |
 
 | Endpoint            | Who                                                  | What it does                                                                                      |
 | ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -289,6 +301,7 @@ Nothing that is sensitive or tunable is hard-coded. Every setting is read from t
 - **Security policy:** link lifetimes (`EMAIL_VERIFY_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`), session lengths, password-hashing cost (`PASSWORD_HASH_*`), and every rate limit (`RATE_LIMIT_*`).
 - **Timeouts and retries:** database, mail, health checks, Redis, CORS cache.
 - **Ports and the demo** (`DEMO_ENABLED`, `DEMO_TTL_HOURS`, `DEMO_MAX_ACTIVE`, `DEMO_PURGE_*`, `TURNSTILE_SECRET_KEY`).
+- **The demo Outbox** (`OUTBOX_MAX_MESSAGES`).
 - **The X-ray** (`XRAY_ENABLED`, `XRAY_BUFFER_SIZE`, `XRAY_BUFFER_TTL_SECONDS`, `XRAY_REPLAY_DEFAULT`, `XRAY_HEARTBEAT_SECONDS`, `XRAY_STREAM_MAX_SECONDS`, `XRAY_MAX_STREAMS_PER_USER`).
 
 Numbers that are _not_ settings stay in code, named, with a comment: time units (`src/common/time.ts`), limits that come from a standard or the API contract such as the 254-character email maximum and the password length bounds (`src/common/limits.ts`), and hard safety bounds on untrusted input (`src/core/config/security-limits.ts`). Changing those changes what clients may send, so they go through code review rather than a deploy setting.
@@ -426,6 +439,7 @@ src/
 │   ├── clients/  tasks/  invoices/   the product domain (tenant-scoped client only)
 │   ├── demo/             sandbox creation, role switching, expiry cleanup, captcha
 │   ├── xray/             the X-ray endpoints: history and live stream
+│   ├── outbox/           the demo Outbox: captured emails (Redis list per sandbox)
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations

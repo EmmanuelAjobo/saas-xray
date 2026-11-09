@@ -8,7 +8,7 @@ const ICONS = {
   'db.queries': '🗄️',
   'http.request': '↔',
   'email.sent': '✉️',
-  'email.skipped': '✉️',
+  'email.captured': '📬',
 };
 
 const STATE_LABELS = {

@@ -1,5 +1,5 @@
 import { h } from './dom.js';
-import { daysUntil, formatMoney, sentenceCase } from './format.js';
+import { daysUntil, formatClock, formatMoney, sentenceCase } from './format.js';
 
 const ROLES = [
   { role: 'OWNER', label: 'Owner', hint: 'Full control' },
@@ -65,6 +65,7 @@ export function renderShell({
   onSignOut,
 }) {
   const invoicesSlot = h('div', { class: 'slot' });
+  const outboxSlot = h('div', { class: 'slot' });
   const tryItSlot = h('div', { class: 'slot' });
   const xraySlot = h('div', { class: 'slot xray-slot' });
   const root = h(
@@ -119,12 +120,13 @@ export function renderShell({
           ' of a demo company. Switch roles above, click around, then watch the X-ray.',
         ),
         invoicesSlot,
+        outboxSlot,
         tryItSlot,
       ),
       h('div', { class: 'right' }, xraySlot),
     ),
   );
-  return { root, invoicesSlot, tryItSlot, xraySlot };
+  return { root, invoicesSlot, outboxSlot, tryItSlot, xraySlot };
 }
 
 const STATUS_HINTS = {
@@ -328,5 +330,52 @@ export function renderToast({ tone, text, onClose }) {
       },
       '✕',
     ),
+  );
+}
+
+/**
+ * The emails this demo sandbox "sent". Demo sandboxes never deliver real email, so the
+ * message is kept here instead, and the visitor sees what the client would have received.
+ * The body is shown with `<pre>` and text nodes only: it contains names a visitor typed, so
+ * it must never be treated as HTML.
+ */
+export function renderOutbox({ messages }) {
+  return h(
+    'section',
+    { class: 'panel' },
+    h(
+      'header',
+      { class: 'panel-head' },
+      h('h2', null, 'Outbox'),
+      h('span', { class: 'hint' }, 'Demo sandboxes never send real email'),
+    ),
+    messages.length === 0
+      ? h(
+          'p',
+          { class: 'empty' },
+          'Send an invoice and the email your client would receive appears here.',
+        )
+      : h(
+          'ul',
+          { class: 'mails' },
+          messages.map((message, index) =>
+            h(
+              'li',
+              null,
+              h(
+                'details',
+                { class: 'mail', open: index === 0 },
+                h(
+                  'summary',
+                  null,
+                  h('span', { class: 'mail-subject' }, message.subject),
+                  h('span', { class: 'mail-to' }, `To ${message.to}`),
+                  h('span', { class: 'card-time' }, formatClock(message.ts)),
+                ),
+                h('pre', { class: 'mail-body' }, message.text),
+              ),
+            ),
+          ),
+        ),
   );
 }

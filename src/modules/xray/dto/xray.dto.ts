@@ -43,7 +43,7 @@ export class XrayEventDto {
       'auth.check',
       'db.queries',
       'email.sent',
-      'email.skipped',
+      'email.captured',
     ],
   })
   kind!: string;

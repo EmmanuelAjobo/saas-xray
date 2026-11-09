@@ -167,6 +167,19 @@ describe('the demo page’s client code against the real API', () => {
       tone: 'ok',
     });
 
+    // The email a demo sandbox "sends" lands in its Outbox: every field the page shows is there.
+    const outbox = await api.request('GET', `/v1/orgs/${orgId}/outbox`);
+    expect(outbox.data).toHaveLength(1);
+    expect(outbox.data[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        ts: expect.any(Number),
+        to: expect.stringContaining('@'),
+        subject: expect.stringContaining(draft.number),
+        text: expect.stringContaining(draft.number),
+      }),
+    );
+
     // 6. A button that must be refused: paying a draft.
     const sentAlready = await actions.payADraft(
       api,
@@ -215,7 +228,7 @@ describe('the demo page’s client code against the real API', () => {
     // The create, and the email that was skipped (demo sandbox) joined to the SEND click.
     expect(byTitle('POST /invoices', 201)?.severity).toBe('success');
     const send = groups.find((g) => g.title.includes('/send'));
-    expect(send?.events.map((e) => e.kind)).toContain('email.skipped');
+    expect(send?.events.map((e) => e.kind)).toContain('email.captured');
 
     // The refusal of paying a draft is a warning card with its database work.
     const pay = groups.find((g) => g.request?.meta.status === 409);

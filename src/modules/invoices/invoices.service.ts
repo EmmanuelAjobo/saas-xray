@@ -21,6 +21,7 @@ import { MailService } from '../../core/mail/mail.service.js';
 import { invoiceSentTemplate } from '../../core/mail/templates.js';
 import { TenantPrismaService } from '../../core/prisma/tenant-prisma.service.js';
 import { emailEvent } from '../../core/xray/xray.events.js';
+import { OutboxService } from '../outbox/outbox.service.js';
 import { recordXrayStep } from '../../core/xray/xray.trace.js';
 import type { InvoiceStatus } from '../../generated/prisma/client.js';
 import type {
@@ -132,6 +133,7 @@ export class InvoicesService {
     private readonly config: AppConfigService,
     private readonly mail: MailService,
     private readonly background: BackgroundTasks,
+    private readonly outbox: OutboxService,
   ) {}
 
   private get db() {
@@ -395,7 +397,11 @@ export class InvoicesService {
 
   // ───────────────────────────── email ─────────────────────────────
 
-  /** Demo organisations never send real mail (ARCHITECTURE §18). Failures never fail the request. */
+  /**
+   * Real organisations: the client is emailed (after the response, failures never fail the
+   * request). Demo organisations never send real mail (ARCHITECTURE §18): the email is
+   * captured in the sandbox's Outbox instead, so the visitor can see what would have gone.
+   */
   private async notifyClient(invoice: {
     number: string;
     currency: string;
@@ -404,30 +410,42 @@ export class InvoicesService {
     client: { name: string; email: string };
   }) {
     const org = await this.db.organization.findFirst({
-      select: { name: true, isDemo: true },
+      select: { id: true, name: true, isDemo: true },
     });
     if (!org) return;
+    const amount = formatMoney(invoice.totalCents, invoice.currency);
+    const email = invoiceSentTemplate({
+      organizationName: org.name,
+      clientName: invoice.client.name,
+      number: invoice.number,
+      amount,
+      dueDate: (invoice.dueDate ?? new Date()).toISOString().slice(0, 10),
+    });
     if (org.isDemo) {
+      // `org.id` comes from the tenant-scoped query above: the caller's own organisation.
+      await this.outbox.capture(org.id, {
+        to: invoice.client.email,
+        subject: email.subject,
+        text: email.text,
+      });
       recordXrayStep(
-        emailEvent({ ts: Date.now(), template: 'invoice-sent', sent: false }),
+        emailEvent({
+          ts: Date.now(),
+          template: 'invoice-sent',
+          outcome: 'captured',
+        }),
       );
       return;
     }
-    const amount = formatMoney(invoice.totalCents, invoice.currency);
     this.background.run('invoice-sent-email', async () => {
-      await this.mail.send({
-        to: invoice.client.email,
-        ...invoiceSentTemplate({
-          organizationName: org.name,
-          clientName: invoice.client.name,
-          number: invoice.number,
-          amount,
-          dueDate: (invoice.dueDate ?? new Date()).toISOString().slice(0, 10),
-        }),
-      });
+      await this.mail.send({ to: invoice.client.email, ...email });
       // Only reached when delivery succeeded (a failure throws and is logged instead).
       recordXrayStep(
-        emailEvent({ ts: Date.now(), template: 'invoice-sent', sent: true }),
+        emailEvent({
+          ts: Date.now(),
+          template: 'invoice-sent',
+          outcome: 'sent',
+        }),
       );
     });
   }

@@ -15,6 +15,7 @@ import { ClientsModule } from './modules/clients/clients.module.js';
 import { DemoModule } from './modules/demo/demo.module.js';
 import { InvitationsModule } from './modules/invitations/invitations.module.js';
 import { InvoicesModule } from './modules/invoices/invoices.module.js';
+import { OutboxModule } from './modules/outbox/outbox.module.js';
 import { MembershipsModule } from './modules/memberships/memberships.module.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
 import { TasksModule } from './modules/tasks/tasks.module.js';
@@ -48,6 +49,7 @@ import { XrayModule } from './modules/xray/xray.module.js';
     ClientsModule,
     TasksModule,
     InvoicesModule,
+    OutboxModule,
     XrayModule,
     HealthModule,
   ],

@@ -15,7 +15,7 @@ export type XrayKind =
   | 'auth.check'
   | 'db.queries'
   | 'email.sent'
-  | 'email.skipped';
+  | 'email.captured';
 
 export type XraySeverity = 'info' | 'success' | 'warn' | 'error';
 
@@ -169,16 +169,18 @@ export function emailEvent(input: {
   ts: number;
   /** A fixed template name from our own code, e.g. "invoice-sent". */
   template: string;
-  sent: boolean;
+  /** "sent": really delivered. "captured": a demo sandbox kept it in its Outbox instead. */
+  outcome: 'sent' | 'captured';
 }): NewXrayEvent {
+  const sent = input.outcome === 'sent';
   return {
     ts: input.ts,
-    kind: input.sent ? 'email.sent' : 'email.skipped',
-    severity: input.sent ? 'success' : 'info',
-    title: input.sent ? 'Email sent' : 'Email not sent',
-    summary: input.sent
+    kind: sent ? 'email.sent' : 'email.captured',
+    severity: sent ? 'success' : 'info',
+    title: sent ? 'Email sent' : 'Email captured',
+    summary: sent
       ? 'The email was handed to the mail provider after the response had already gone out.'
-      : 'Not sent: demo organisations never send real email.',
+      : 'Not sent: demo sandboxes never send real email. It is kept in your Outbox so you can see it.',
     meta: { template: plain(input.template, 60) },
   };
 }

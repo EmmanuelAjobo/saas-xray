@@ -154,7 +154,7 @@ describe('XrayMiddleware', () => {
         setTimeout(() => later(), 0);
         later = () =>
           recordXrayStep(
-            emailEvent({ ts: 2, template: 'invoice-sent', sent: true }),
+            emailEvent({ ts: 2, template: 'invoice-sent', outcome: 'sent' }),
           );
       },
     });
@@ -173,7 +173,9 @@ describe('XrayMiddleware', () => {
       handler: () => {
         setTimeout(
           () =>
-            recordXrayStep(emailEvent({ ts: 2, template: 'x', sent: true })),
+            recordXrayStep(
+              emailEvent({ ts: 2, template: 'x', outcome: 'sent' }),
+            ),
           0,
         );
       },

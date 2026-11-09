@@ -176,7 +176,7 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
       expect(last.summary).toContain('conflicts with the current state');
     });
 
-    it('says the email was skipped in a demo sandbox', async () => {
+    it('says the email was captured in the Outbox (not sent) in a demo sandbox', async () => {
       const visitor = await createAuthedUser(app, db, 'demo@example.com', {
         isDemo: true,
       });
@@ -205,9 +205,10 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
       ).expect(200);
 
       const skipped = (await eventsOf(visitor, sandbox)).find(
-        (e) => e.kind === 'email.skipped',
+        (e) => e.kind === 'email.captured',
       );
-      expect(skipped?.summary).toContain('demo organisations never send');
+      expect(skipped?.summary).toContain('demo sandboxes never send');
+      expect(skipped?.summary).toContain('Outbox');
       expect(mail.sent).toHaveLength(0);
     });
 

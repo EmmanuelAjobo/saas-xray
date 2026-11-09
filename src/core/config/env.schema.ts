@@ -224,6 +224,9 @@ const baseSchema = z.object({
   /** How long a "Try the demo" sandbox lives before it is deleted. */
   DEMO_TTL_HOURS: intSetting(24, 1, 168),
 
+  /** Emails kept per demo sandbox in its Outbox (what the sandbox "sent" but never delivered). */
+  OUTBOX_MAX_MESSAGES: intSetting(20, 1, 200),
+
   /** The Backend X-ray (a live record of what the backend does per request). false = off. */
   XRAY_ENABLED: z
     .enum(['true', 'false'])

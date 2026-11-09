@@ -9,6 +9,8 @@ import { buildPinoHttpOptions } from '../../src/core/logger/logger.config.js';
 import { BackgroundTasks } from '../../src/core/background/background-tasks.service.js';
 import { MAIL_TRANSPORT } from '../../src/core/mail/mail.types.js';
 import { PrismaService } from '../../src/core/prisma/prisma.service.js';
+import { MemoryOutboxStore } from '../../src/modules/outbox/memory-outbox.store.js';
+import { OUTBOX_STORE } from '../../src/modules/outbox/outbox.types.js';
 import { TenantPrismaService } from '../../src/core/prisma/tenant-prisma.service.js';
 import { RedisThrottlerStorage } from '../../src/core/rate-limit/redis-throttler.storage.js';
 import { RedisService } from '../../src/core/redis/redis.service.js';
@@ -80,7 +82,10 @@ export async function createTestApp({
       .useValue(mail)
       // X-ray events kept in memory: tests of the layers above need no Redis streams.
       .overrideProvider(XRAY_STORE)
-      .useClass(MemoryXrayStore);
+      .useClass(MemoryXrayStore)
+      // Captured demo emails kept in memory too.
+      .overrideProvider(OUTBOX_STORE)
+      .useClass(MemoryOutboxStore);
     if (!realDatabase) {
       builder = builder
         .overrideProvider(PrismaService)

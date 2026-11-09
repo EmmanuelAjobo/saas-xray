@@ -145,7 +145,11 @@ describe('X-ray event builders', () => {
 
   describe('emailEvent', () => {
     it('describes a sent email without naming a recipient', () => {
-      const event = emailEvent({ ts: 1, template: 'invoice-sent', sent: true });
+      const event = emailEvent({
+        ts: 1,
+        template: 'invoice-sent',
+        outcome: 'sent',
+      });
       expect(event).toMatchObject({
         kind: 'email.sent',
         severity: 'success',
@@ -154,14 +158,16 @@ describe('X-ray event builders', () => {
       expect(JSON.stringify(event)).not.toMatch(/@/);
     });
 
-    it('explains why a demo email was skipped', () => {
+    it('says a demo email was captured in the Outbox, not sent, and names no recipient', () => {
       const event = emailEvent({
         ts: 1,
         template: 'invoice-sent',
-        sent: false,
+        outcome: 'captured',
       });
-      expect(event.kind).toBe('email.skipped');
-      expect(event.summary).toContain('demo organisations never send');
+      expect(event.kind).toBe('email.captured');
+      expect(event.summary).toContain('demo sandboxes never send');
+      expect(event.summary).toContain('Outbox');
+      expect(JSON.stringify(event)).not.toMatch(/@/);
     });
   });
 
@@ -196,7 +202,7 @@ describe('X-ray event builders', () => {
         allowed: true,
       }),
       dbQueriesEvent({ ts: 1, count: 1, totalMs: 1, models: ['Task'] }),
-      emailEvent({ ts: 1, template: 'invoice-sent', sent: true }),
+      emailEvent({ ts: 1, template: 'invoice-sent', outcome: 'sent' }),
     ];
     for (const event of events) {
       for (const value of Object.values(event.meta)) {

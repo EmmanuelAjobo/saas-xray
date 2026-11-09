@@ -12,6 +12,7 @@ import { ApiError, createApi } from './api.js';
 import {
   renderInvoices,
   renderLanding,
+  renderOutbox,
   renderShell,
   renderToast,
   renderTryIt,
@@ -40,6 +41,8 @@ const state = {
   role: 'OWNER',
   invoices: /** @type {any[]} */ ([]),
   clients: /** @type {any[]} */ ([]),
+  /** Emails the demo sandbox "sent" (captured, never delivered). */
+  outbox: /** @type {any[]} */ ([]),
   loadingInvoices: false,
   developer: false,
   stream: {
@@ -86,11 +89,17 @@ function drawInvoices() {
             state.sample++,
           ),
         ),
-      onSend: (invoice) => run(() => sendInvoice(api, state.org.id, invoice)),
+      onSend: (invoice) =>
+        run(() => sendInvoice(api, state.org.id, invoice), { outbox: true }),
       onPay: (invoice) => run(() => payInvoice(api, state.org.id, invoice)),
       onVoid: (invoice) => run(() => voidInvoice(api, state.org.id, invoice)),
     }),
   );
+}
+
+function drawOutbox() {
+  if (!shell) return;
+  mount(shell.outboxSlot, renderOutbox({ messages: state.outbox }));
 }
 
 function drawTryIt() {
@@ -167,6 +176,7 @@ function draw() {
     });
     mount(root, shell.root);
     drawInvoices();
+    drawOutbox();
     drawTryIt();
     drawXray();
   }
@@ -174,7 +184,23 @@ function draw() {
 
 // ───────────────────────────── data ─────────────────────────────
 
-async function loadData() {
+/** The emails this sandbox captured. Never fails the page: no outbox just means an empty one. */
+async function loadOutbox() {
+  try {
+    const outbox = await api.request('GET', `/v1/orgs/${state.org.id}/outbox`);
+    state.outbox = outbox.data;
+  } catch {
+    state.outbox = [];
+  }
+  drawOutbox();
+}
+
+/**
+ * Refreshes the lists. The outbox is fetched only when asked (first load, and after a send),
+ * so the X-ray does not fill with a request for it after every single click.
+ * @param {{ outbox?: boolean }} [options]
+ */
+async function loadData({ outbox = false } = {}) {
   state.loadingInvoices = true;
   drawInvoices();
   const [invoices, clients] = await Promise.all([
@@ -185,17 +211,18 @@ async function loadData() {
   state.clients = clients.data;
   state.loadingInvoices = false;
   drawInvoices();
+  if (outbox) await loadOutbox();
 }
 
 /** Runs one of the buttons: locks the screen, shows what happened, refreshes the list. */
-async function run(action) {
+async function run(action, { outbox = false } = {}) {
   if (state.busy) return;
   state.busy = true;
   drawInvoices();
   drawTryIt();
   try {
     toast(await action());
-    await loadData();
+    await loadData({ outbox });
   } catch (error) {
     toast({ tone: 'error', text: 'Something went wrong. Please try again.' });
     console.error(error);
@@ -217,6 +244,7 @@ async function enter() {
   state.role = org.role ?? state.role;
   state.invoices = [];
   state.clients = [];
+  state.outbox = [];
   timeline.clear();
   openCards.clear();
   state.stream = { state: 'connecting', detail: undefined };
@@ -236,7 +264,7 @@ async function enter() {
       drawXray();
     },
   });
-  await loadData();
+  await loadData({ outbox: true });
 }
 
 async function startDemo() {
