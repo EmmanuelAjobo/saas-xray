@@ -2,6 +2,11 @@
   "name": "Emmanuel Ajobo",
   "headline": "Backend developer, open to freelance and contract work",
   "links": [
+    {
+      "label": "LinkedIn",
+      "href": "https://www.linkedin.com/in/emmanuel-ajobo/"
+    },
+    { "label": "Email", "href": "mailto:ajoboemmanuel04@gmail.com" },
     { "label": "GitHub", "href": "https://github.com/EmmanuelAjobo" },
     {
       "label": "Source code",

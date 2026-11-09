@@ -12,8 +12,10 @@ This is a portfolio project, built in public, milestone by milestone. The design
 
 I'm Emmanuel, a backend developer open to **freelance and contract work** for early-stage SaaS teams: secure authentication, multi-tenant data isolation, billing, background jobs and APIs that are properly tested. This project is how I work: every protection in it was proven by switching it off and watching a test fail.
 
+- **LinkedIn:** [linkedin.com/in/emmanuel-ajobo](https://www.linkedin.com/in/emmanuel-ajobo/)
+- **Email:** [ajoboemmanuel04@gmail.com](mailto:ajoboemmanuel04@gmail.com)
 - **GitHub:** [EmmanuelAjobo](https://github.com/EmmanuelAjobo)
-- **The live demo** has a contact footer too: [open it](https://saas-xray-production.up.railway.app)
+- **The live demo** has the same contact footer: [open it](https://saas-xray-production.up.railway.app)
 
 ## Contents
 
