@@ -94,4 +94,30 @@ describe('web page: safety rules', () => {
     }
     expect(dom).toContain('SAME_SITE_LINK');
   });
+
+  it('the contact file only links to the few allowed places, and always has a name', () => {
+    const contact = JSON.parse(
+      readFileSync(join(WEB, 'contact.json'), 'utf8'),
+    ) as {
+      name: string;
+      links: Array<{ label: string; href: string }>;
+    };
+    expect(contact.name.length).toBeGreaterThan(0);
+    expect(contact.links.length).toBeGreaterThan(0);
+    for (const { href } of contact.links) {
+      const ok =
+        /^mailto:[^\s@?#:/]+@[^\s@?#:/]+\.[^\s@?#:/]+$/.test(href) ||
+        (() => {
+          const url = new URL(href);
+          return (
+            url.protocol === 'https:' &&
+            ['github.com', 'linkedin.com', 'www.linkedin.com'].includes(
+              url.hostname,
+            ) &&
+            url.username === ''
+          );
+        })();
+      expect(ok, href).toBe(true);
+    }
+  });
 });

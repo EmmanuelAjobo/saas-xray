@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { safeErrorMessage } from '../../common/redact.js';
 
 /**
  * Runs work after the HTTP response is decided, without letting a failure reach the caller.
@@ -22,9 +23,7 @@ export class BackgroundTasks implements OnModuleDestroy {
       } catch (error) {
         // Log the cause, never the payload: tasks may carry tokens or addresses.
         this.logger.error(
-          `Background task "${name}" failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Background task "${name}" failed: ${safeErrorMessage(error)}`,
         );
       }
     })().finally(() => this.pending.delete(tracked));

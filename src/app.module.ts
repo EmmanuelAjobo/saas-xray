@@ -3,6 +3,7 @@ import { CommonModule } from './common/common.module.js';
 import { BackgroundModule } from './core/background/background.module.js';
 import { ConfigModule } from './core/config/config.module.js';
 import { ContextModule } from './core/context/context.module.js';
+import { JobsModule } from './core/jobs/jobs.module.js';
 import { HealthModule } from './core/health/health.module.js';
 import { LoggerModule } from './core/logger/logger.module.js';
 import { MailModule } from './core/mail/mail.module.js';
@@ -15,6 +16,7 @@ import { ClientsModule } from './modules/clients/clients.module.js';
 import { DemoModule } from './modules/demo/demo.module.js';
 import { InvitationsModule } from './modules/invitations/invitations.module.js';
 import { InvoicesModule } from './modules/invoices/invoices.module.js';
+import { JobsHandlersModule } from './modules/jobs/jobs-handlers.module.js';
 import { OutboxModule } from './modules/outbox/outbox.module.js';
 import { MembershipsModule } from './modules/memberships/memberships.module.js';
 import { OrganizationsModule } from './modules/organizations/organizations.module.js';
@@ -33,6 +35,7 @@ import { XrayModule } from './modules/xray/xray.module.js';
     BackgroundModule,
     MailModule,
     XrayCoreModule,
+    JobsModule,
     // Request pipeline: error filter, validation, timeout.
     CommonModule,
     // Guards run in this order: rate limit first (cheap rejection), then authentication.
@@ -50,6 +53,7 @@ import { XrayModule } from './modules/xray/xray.module.js';
     TasksModule,
     InvoicesModule,
     OutboxModule,
+    JobsHandlersModule,
     XrayModule,
     HealthModule,
   ],

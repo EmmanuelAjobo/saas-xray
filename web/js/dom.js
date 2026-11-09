@@ -12,6 +12,38 @@ const UNSAFE_ATTRIBUTES = new Set([
 /** "/docs", "#top": a path or fragment on this site. Rejects "javascript:" and "//evil.example". */
 const SAME_SITE_LINK = /^(\/(?!\/)|#)/;
 
+/** The only other sites a link may point to: where a visitor can reach the author. */
+const ALLOWED_EXTERNAL_HOSTS = new Set([
+  'github.com',
+  'linkedin.com',
+  'www.linkedin.com',
+]);
+
+/** A plain address only: no "?subject=" or other tricks. */
+const MAIL_LINK = /^mailto:[^\s@?#:/]+@[^\s@?#:/]+\.[^\s@?#:/]+$/;
+
+/**
+ * Whether a link may be put on the page: a path on this site, a mail address, or an https
+ * link to one of the few allowed sites. Never "javascript:", "data:", other hosts, or a URL
+ * with credentials in it ("https://github.com@evil.example").
+ * @param {string} href
+ * @returns {boolean}
+ */
+export function isAllowedLink(href) {
+  if (SAME_SITE_LINK.test(href) || MAIL_LINK.test(href)) return true;
+  try {
+    const url = new URL(href);
+    return (
+      url.protocol === 'https:' &&
+      ALLOWED_EXTERNAL_HOSTS.has(url.hostname) &&
+      url.username === '' &&
+      url.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Builds a DOM element. This is the ONLY way the page puts text on screen, and it can only
  * make text nodes: there is deliberately no way to pass HTML. Text from the server (names,
@@ -40,10 +72,17 @@ export function h(tag, props, ...children) {
       element.addEventListener(name.slice(2).toLowerCase(), value);
     } else if (UNSAFE_ATTRIBUTES.has(name)) {
       throw new TypeError(`The ${name} attribute is not allowed`);
-    } else if (name === 'href' && !SAME_SITE_LINK.test(String(value))) {
-      // Links go to this site only (a path or "#"), never to a URL built from data.
+    } else if (name === 'href' && !isAllowedLink(String(value))) {
+      // Links go to this site, or to the few allowed contact sites, never to a URL built from data.
       throw new TypeError('href must be a path on this site');
     } else {
+      if (name === 'href' && !SAME_SITE_LINK.test(String(value))) {
+        // Leaving this site: the new page gets no handle back to this one.
+        element.setAttribute('rel', 'noopener noreferrer');
+        if (String(value).startsWith('https:')) {
+          element.setAttribute('target', '_blank');
+        }
+      }
       element.setAttribute(name, value === true ? '' : String(value));
     }
   }

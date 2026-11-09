@@ -26,6 +26,14 @@ describe('the demo page (HTTP, real app configuration)', () => {
     expect(style.headers['content-type']).toMatch(/text\/css/);
   });
 
+  it('serves the contact file the footer reads, as JSON with a name and links', async () => {
+    const res = await http().get('/contact.json').expect(200);
+    expect(res.headers['content-type']).toMatch(/application\/json/);
+    const contact = res.body as { name: string; links: unknown[] };
+    expect(contact.name.length).toBeGreaterThan(0);
+    expect(contact.links.length).toBeGreaterThan(0);
+  });
+
   it('lets the browser revalidate (a deploy shows up straight away)', async () => {
     const res = await http().get('/js/main.js').expect(200);
     expect(res.headers['cache-control']).toBe('public, max-age=0');

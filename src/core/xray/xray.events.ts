@@ -15,7 +15,12 @@ export type XrayKind =
   | 'auth.check'
   | 'db.queries'
   | 'email.sent'
-  | 'email.captured';
+  | 'email.captured'
+  | 'job.queued'
+  | 'job.active'
+  | 'job.completed'
+  | 'job.retry'
+  | 'job.failed';
 
 export type XraySeverity = 'info' | 'success' | 'warn' | 'error';
 
@@ -167,6 +172,8 @@ export function dbQueriesEvent(input: {
 
 export function emailEvent(input: {
   ts: number;
+  /** Joins the event to the click that caused it (work done after the response). */
+  requestId?: string;
   /** A fixed template name from our own code, e.g. "invoice-sent". */
   template: string;
   /** "sent": really delivered. "captured": a demo sandbox kept it in its Outbox instead. */
@@ -175,6 +182,7 @@ export function emailEvent(input: {
   const sent = input.outcome === 'sent';
   return {
     ts: input.ts,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
     kind: sent ? 'email.sent' : 'email.captured',
     severity: sent ? 'success' : 'info',
     title: sent ? 'Email sent' : 'Email captured',
@@ -182,5 +190,71 @@ export function emailEvent(input: {
       ? 'The email was handed to the mail provider after the response had already gone out.'
       : 'Not sent: demo sandboxes never send real email. It is kept in your Outbox so you can see it.',
     meta: { template: plain(input.template, 60) },
+  };
+}
+
+export type JobPhase = 'queued' | 'active' | 'completed' | 'retry' | 'failed';
+
+/** Seconds for a human sentence: "5 s", "2 min". */
+function waitText(ms: number): string {
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} s`;
+  return `${Math.round(ms / 60_000)} min`;
+}
+
+/**
+ * One step in the life of a background job. Says WHAT ran and how it went, never what it
+ * carried: the payload (addresses, names, amounts) and any error text stay out of the event.
+ */
+export function jobEvent(input: {
+  ts: number;
+  requestId?: string;
+  /** A fixed human label from our own code, e.g. "invoice email". */
+  label: string;
+  phase: JobPhase;
+  attempt?: number;
+  attempts?: number;
+  durationMs?: number;
+  /** For "retry": how long until the next attempt. */
+  nextDelayMs?: number;
+  /** A short sentence from our own code, e.g. "3 invoices marked overdue". */
+  detail?: string;
+}): NewXrayEvent {
+  const of =
+    input.attempt !== undefined && input.attempts !== undefined
+      ? ` (attempt ${input.attempt} of ${input.attempts})`
+      : '';
+  const summaries: Record<JobPhase, string> = {
+    queued: `Queued the ${input.label} to run in the background, so your click is not kept waiting.`,
+    active: `A worker picked up the ${input.label}${of}.`,
+    completed: `The ${input.label} finished${
+      input.durationMs !== undefined
+        ? ` in ${Math.max(0, Math.round(input.durationMs))} ms`
+        : ''
+    }${input.detail ? `: ${input.detail}` : ''}.`,
+    retry: `The ${input.label} failed${of}; trying again in ${waitText(input.nextDelayMs ?? 0)}.`,
+    failed: `The ${input.label} failed${of} and was given up on. It stays in the failed set so it can be inspected.`,
+  };
+  const severities: Record<JobPhase, XraySeverity> = {
+    queued: 'info',
+    active: 'info',
+    completed: 'success',
+    retry: 'warn',
+    failed: 'error',
+  };
+  const meta: XrayMeta = { job: plain(input.label, 60) };
+  if (input.attempt !== undefined) meta.attempt = input.attempt;
+  if (input.attempts !== undefined) meta.attempts = input.attempts;
+  if (input.durationMs !== undefined) {
+    meta.durationMs = Math.max(0, Math.round(input.durationMs));
+  }
+  if (input.nextDelayMs !== undefined) meta.nextDelayMs = input.nextDelayMs;
+  return {
+    ts: input.ts,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    kind: `job.${input.phase}`,
+    severity: severities[input.phase],
+    title: plain(`Background job: ${input.label}`),
+    summary: plain(summaries[input.phase], 240),
+    meta,
   };
 }

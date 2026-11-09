@@ -1,4 +1,5 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { JOB_QUEUE, type JobQueue } from '../src/core/jobs/jobs.types.js';
 import { PrismaService } from '../src/core/prisma/prisma.service.js';
 import { XrayService } from '../src/core/xray/xray.service.js';
 import { createTestApp } from './support/create-test-app.js';
@@ -220,5 +221,74 @@ describe('the demo Outbox (HTTP + real Postgres)', () => {
     const text = JSON.stringify(events.body);
     expect(text).not.toContain('private-recipient@example.com');
     expect(text).toContain('email.captured');
+  });
+
+  describe('how the invoice email is queued', () => {
+    async function sendAndCaptureJob(orgKind: 'demo' | 'real') {
+      const queue = app.get<JobQueue>(JOB_QUEUE);
+      const add = vi.spyOn(queue, 'add');
+      try {
+        if (orgKind === 'demo') {
+          const { owner, orgId } = await sandbox('acme');
+          await sendInvoice(owner, orgId, 'Buyer', 'buyer@example.com');
+          await background.drain();
+          return { call: add.mock.calls.at(-1), orgId };
+        }
+        const owner = await createAuthedUser(app, db, 'real-owner@example.com');
+        const { id: orgId } = await createOrgWith(db, 'real', [
+          { user: owner, role: 'OWNER' },
+        ]);
+        await sendInvoice(owner, orgId, 'Buyer', 'buyer@example.com');
+        await background.drain();
+        return { call: add.mock.calls.at(-1), orgId };
+      } finally {
+        add.mockRestore();
+      }
+    }
+
+    it('uses the invoice’s own id as the job id, so the same invoice is never emailed twice', async () => {
+      const { call } = await sendAndCaptureJob('real');
+      const [name, data, options] = call as [
+        string,
+        { invoiceId: string },
+        { jobId: string },
+      ];
+      expect(name).toBe('invoice-email');
+      expect(options.jobId).toBe(`invoice-email-${data.invoiceId}`);
+      expect(options.jobId).not.toContain(':'); // BullMQ forbids ":" in a job id
+    });
+
+    it('asks for real delivery for a real organisation and the Outbox for a demo sandbox', async () => {
+      const real = await sendAndCaptureJob('real');
+      expect((real.call?.[1] as { delivery: string }).delivery).toBe('send');
+      const demo = await sendAndCaptureJob('demo');
+      expect((demo.call?.[1] as { delivery: string }).delivery).toBe('outbox');
+    });
+
+    it('queues only what the email needs, tied to the verified organisation, with nothing secret in it', async () => {
+      const { call, orgId } = await sendAndCaptureJob('real');
+      const data = call?.[1] as Record<string, unknown>;
+      expect(data.organizationId).toBe(orgId);
+      // Exactly the fields the handler uses (and the request id that ties it to the click):
+      // anything new added here has to be added to this list on purpose.
+      expect(Object.keys(data).sort()).toEqual(
+        [
+          'amount',
+          'clientName',
+          'delivery',
+          'dueDate',
+          'invoiceId',
+          'number',
+          'organizationId',
+          'organizationName',
+          'requestId',
+          'to',
+        ].sort(),
+      );
+      // Redis keeps queued jobs: no tokens, passwords or hashes may ever be in one.
+      expect(JSON.stringify(data)).not.toMatch(
+        /token|password|secret|hash|bearer/i,
+      );
+    });
   });
 });

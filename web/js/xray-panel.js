@@ -9,6 +9,11 @@ const ICONS = {
   'http.request': '↔',
   'email.sent': '✉️',
   'email.captured': '📬',
+  'job.queued': '📋',
+  'job.active': '⚙️',
+  'job.completed': '✅',
+  'job.retry': '🔁',
+  'job.failed': '⛔',
 };
 
 const STATE_LABELS = {

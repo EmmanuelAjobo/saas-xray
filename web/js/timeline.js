@@ -55,7 +55,10 @@ export function createTimeline({ maxGroups = MAX_GROUPS } = {}) {
 
   /** @param {Group} group */
   function refresh(group) {
-    group.events.sort((a, b) => compareIds(a.id, b.id));
+    // The order things HAPPENED in (ts), not the order they were written to the stream: a
+    // background job can finish and report before the request that queued it has published
+    // its own events. The id only breaks ties between events in the same millisecond.
+    group.events.sort((a, b) => a.ts - b.ts || compareIds(a.id, b.id));
     group.request = group.events.find((e) => e.kind === 'http.request');
     group.title = group.request?.title ?? group.events[0]?.title ?? 'Activity';
     group.severity = group.events.reduce(
@@ -103,13 +106,17 @@ export function createTimeline({ maxGroups = MAX_GROUPS } = {}) {
       return true;
     },
 
-    /** Newest click first. */
+    /** The click with the newest activity first. */
     groups() {
-      return [...byKey.values()].sort((a, b) => {
-        const aLast = a.events.at(-1)?.id ?? '0-0';
-        const bLast = b.events.at(-1)?.id ?? '0-0';
-        return compareIds(bLast, aLast);
-      });
+      /** The highest stream id in a card: when it last changed. */
+      const newest = (/** @type {Group} */ group) =>
+        group.events.reduce(
+          (max, e) => (compareIds(e.id, max) > 0 ? e.id : max),
+          '0-0',
+        );
+      return [...byKey.values()].sort((a, b) =>
+        compareIds(newest(b), newest(a)),
+      );
     },
 
     clear() {
@@ -117,4 +124,14 @@ export function createTimeline({ maxGroups = MAX_GROUPS } = {}) {
       seen.clear();
     },
   };
+}
+
+/**
+ * Whether an X-ray event means the Outbox has something new to show. The email is captured
+ * by a background job a moment AFTER the click returns, so asking for the Outbox right away
+ * is often too early; the event that says it happened is the reliable signal.
+ * @param {{ kind: string }} event
+ */
+export function outboxChanged(event) {
+  return event.kind === 'email.captured';
 }

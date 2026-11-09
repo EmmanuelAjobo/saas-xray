@@ -91,6 +91,30 @@ describe('h()', () => {
     },
   );
 
+  it.each([
+    'https://github.com/EmmanuelAjobo',
+    'https://www.linkedin.com/in/someone',
+    'https://linkedin.com/in/someone',
+    'mailto:hello@example.com',
+  ])(
+    'allows a link to the contact address %s, and makes it safe to follow',
+    (href) => {
+      const el = h('a', { href });
+      expect(el.attributes.href).toBe(href);
+      // The page you leave gets no handle back to this one.
+      expect(el.attributes.rel).toBe('noopener noreferrer');
+      expect(el.attributes.target).toBe(
+        href.startsWith('https:') ? '_blank' : undefined,
+      );
+    },
+  );
+
+  it('does not add rel or target to a link inside this site', () => {
+    const el = h('a', { href: '/docs' });
+    expect(el.attributes.rel).toBeUndefined();
+    expect(el.attributes.target).toBeUndefined();
+  });
+
   it.each(['/docs', '#top', '/'])(
     'allows a link to %s on this site',
     (href) => {
@@ -105,6 +129,14 @@ describe('h()', () => {
     'data:text/html,x',
     'docs',
     ' /docs',
+    'http://github.com/x',
+    'https://github.com@evil.example/x',
+    'https://github.com.evil.example/x',
+    'https://user:secret@github.com/EmmanuelAjobo',
+    'https://anyone@www.linkedin.com/in/x',
+    'https://evil.example',
+    'mailto:a@b.com?subject=x',
+    'mailto:nope',
   ])('REFUSES a link to %s', (href) => {
     expect(() => h('a', { href })).toThrow(/href must be a path/);
   });

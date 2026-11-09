@@ -1,0 +1,11 @@
+{
+  "name": "Emmanuel Ajobo",
+  "headline": "Backend developer, open to freelance and contract work",
+  "links": [
+    { "label": "GitHub", "href": "https://github.com/EmmanuelAjobo" },
+    {
+      "label": "Source code",
+      "href": "https://github.com/EmmanuelAjobo/saas-xray"
+    }
+  ]
+}

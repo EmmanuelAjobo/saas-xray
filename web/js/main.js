@@ -12,13 +12,15 @@ import { ApiError, createApi } from './api.js';
 import {
   renderInvoices,
   renderLanding,
+  renderContact,
   renderOutbox,
   renderShell,
   renderToast,
   renderTryIt,
 } from './app-view.js';
+import { loadContact } from './contact.js';
 import { mount } from './dom.js';
-import { createTimeline } from './timeline.js';
+import { createTimeline, outboxChanged } from './timeline.js';
 import { renderXrayPanel } from './xray-panel.js';
 import { startXrayStream } from './xray-stream.js';
 
@@ -29,6 +31,9 @@ const LIST_LIMIT = 50;
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
 const toasts = /** @type {HTMLElement} */ (document.getElementById('toasts'));
+const contactSlot = /** @type {HTMLElement} */ (
+  document.getElementById('contact')
+);
 const api = createApi();
 
 const state = {
@@ -195,6 +200,17 @@ async function loadOutbox() {
   drawOutbox();
 }
 
+let outboxRefreshQueued = false;
+/** Refreshes the Outbox, at most once per burst of events (history replay can send many). */
+function refreshOutbox() {
+  if (outboxRefreshQueued) return;
+  outboxRefreshQueued = true;
+  setTimeout(() => {
+    outboxRefreshQueued = false;
+    if (state.org) void loadOutbox();
+  }, 150);
+}
+
 /**
  * Refreshes the lists. The outbox is fetched only when asked (first load, and after a send),
  * so the X-ray does not fill with a request for it after every single click.
@@ -257,7 +273,11 @@ async function enter() {
     getToken: () => api.token,
     refreshToken: api.refresh,
     onEvent: (event) => {
-      if (timeline.add(event)) drawXray();
+      if (!timeline.add(event)) return;
+      drawXray();
+      // The email is captured by a background job just after the click returns: when the
+      // X-ray says so, look in the Outbox.
+      if (outboxChanged(event)) refreshOutbox();
     },
     onState: (streamState, detail) => {
       state.stream = { state: streamState, detail };
@@ -355,5 +375,11 @@ async function boot() {
   state.phase = 'landing';
   draw();
 }
+
+// Who built this and how to reach them. Independent of everything else: if it cannot load,
+// the page just has no footer.
+void loadContact().then((contact) =>
+  mount(contactSlot, renderContact(contact)),
+);
 
 void boot();

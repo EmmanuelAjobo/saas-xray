@@ -15,6 +15,7 @@ import {
 
 interface Event {
   id: string;
+  ts: number;
   requestId?: string;
   kind: string;
   severity: string;
@@ -50,6 +51,11 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
     return (res.body as { data: Event[] }).data;
   };
   const kinds = (events: Event[]) => events.map((e) => e.kind);
+  /** The order things happened in (what a person reads), not the order they were written. */
+  const chronological = (events: Event[]) =>
+    [...events].sort(
+      (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
 
   beforeAll(async () => {
     ({ app, background, mail } = await createTestApp({
@@ -66,6 +72,7 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
   });
   beforeEach(async () => {
     await resetDb(db);
+    mail.clear();
     owner = await createAuthedUser(app, db, 'owner@example.com');
     member = await createAuthedUser(app, db, 'member@example.com');
     outsider = await createAuthedUser(app, db, 'outsider@example.com');
@@ -209,6 +216,11 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
       );
       expect(skipped?.summary).toContain('demo sandboxes never send');
       expect(skipped?.summary).toContain('Outbox');
+      // Even a demo's "send" is a background job: the visitor sees it queued and completed.
+      const demoKinds = (await eventsOf(visitor, sandbox)).map((e) => e.kind);
+      expect(demoKinds).toEqual(
+        expect.arrayContaining(['job.queued', 'job.active', 'job.completed']),
+      );
       expect(mail.sent).toHaveLength(0);
     });
 
@@ -236,6 +248,82 @@ describe('Backend X-ray (HTTP + real Postgres)', () => {
       expect(kinds(ofThatClick)).toContain('http.request');
       expect(kinds(ofThatClick)).toContain('email.sent');
       expect(mail.sent).toHaveLength(1);
+      // The background job's whole life is on the same card: queued during the click, then
+      // picked up and finished by the worker after the response.
+      expect(kinds(ofThatClick)).toEqual(
+        expect.arrayContaining([
+          'job.queued',
+          'job.active',
+          'job.completed',
+          'email.sent',
+        ]),
+      );
+      // The story reads in order: queued in the click, picked up by the worker, the email
+      // goes out, and only then is the job complete.
+      const order = kinds(chronological(ofThatClick));
+      expect(order.indexOf('job.queued')).toBeLessThan(
+        order.indexOf('job.active'),
+      );
+      expect(order.indexOf('job.active')).toBeLessThan(
+        order.indexOf('email.sent'),
+      );
+      expect(order.indexOf('email.sent')).toBeLessThan(
+        order.indexOf('job.completed'),
+      );
+    });
+
+    it('shows a failing mail provider being retried, then given up on, without hiding or leaking anything', async () => {
+      const made = await http('post', `/v1/orgs/${orgId}/clients`, {
+        bearer: owner.token,
+        body: { name: 'Buyer', email: 'private.buyer@example.com' },
+      }).expect(201);
+      const invoice = await http('post', `/v1/orgs/${orgId}/invoices`, {
+        bearer: owner.token,
+        body: {
+          clientId: (made.body as { id: string }).id,
+          items: [{ description: 'Work', quantity: 1, unitPriceCents: 5000 }],
+        },
+      }).expect(201);
+      mail.failWith = new Error('550 rejected private.buyer@example.com');
+      try {
+        // The provider is down, but the click still succeeds: the email is background work.
+        const sent = await http(
+          'post',
+          `/v1/orgs/${orgId}/invoices/${(invoice.body as { id: string }).id}/send`,
+          { bearer: owner.token },
+        ).expect(200);
+
+        const events = await eventsOf(owner);
+        const ofThatClick = events.filter(
+          (e) => e.requestId === (sent.headers['x-request-id'] as string),
+        );
+        // 3 attempts in total (EMAIL_JOB_ATTEMPTS): two "retry", then "failed".
+        expect(
+          kinds(ofThatClick).filter((k) => k === 'job.active'),
+        ).toHaveLength(3);
+        expect(
+          kinds(ofThatClick).filter((k) => k === 'job.retry'),
+        ).toHaveLength(2);
+        // Whatever else happens, the LAST thing the job reports is that it gave up.
+        expect(
+          kinds(chronological(ofThatClick))
+            .filter((k) => k.startsWith('job.'))
+            .at(-1),
+        ).toBe('job.failed');
+        expect(kinds(ofThatClick)).not.toContain('job.completed');
+        expect(kinds(ofThatClick)).not.toContain('email.sent');
+        expect(ofThatClick.find((e) => e.kind === 'job.failed')?.severity).toBe(
+          'error',
+        );
+
+        // Nothing about the recipient or the provider's error reaches the X-ray.
+        const text = JSON.stringify(events);
+        expect(text).not.toContain('private.buyer@example.com');
+        expect(text).not.toContain('550 rejected');
+        expect(mail.sent).toHaveLength(0);
+      } finally {
+        mail.failWith = undefined;
+      }
     });
   });
 

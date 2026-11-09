@@ -1,13 +1,23 @@
 # SaaS X-ray
 
-**A multi-tenant team task & invoice SaaS backend that shows its own work.** Built with NestJS, PostgreSQL and Redis, with a live **Backend X-ray** panel (planned) that narrates what the server does behind every click: auth checks, database queries, queued jobs, rate limits.
+**A multi-tenant team task & invoice SaaS backend that shows its own work.** Built with NestJS, PostgreSQL and Redis. A live **Backend X-ray** panel narrates what the server does behind every click: membership and permission checks, database queries, background jobs (queued, picked up, retried) and the email your client would receive.
+
+**▶ [Try it live](https://saas-xray-production.up.railway.app)** (one click, no sign-up, your own private sandbox) · [API docs](https://saas-xray-production.up.railway.app/docs) · [Source code](https://github.com/EmmanuelAjobo/saas-xray)
 
 This is a portfolio project, built in public, milestone by milestone. The design, with diagrams and the reasoning behind each decision, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-> **Last updated:** after Milestone 10 (the demo Outbox: see the email a client would receive). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+> **Last updated:** after Milestone 11 (background jobs: a Redis queue with retries, and the overdue-invoice sweep). This README is updated as each milestone lands. See [Roadmap](#roadmap) for what is built and what is next.
+
+## Work with me
+
+I'm Emmanuel, a backend developer open to **freelance and contract work** for early-stage SaaS teams: secure authentication, multi-tenant data isolation, billing, background jobs and APIs that are properly tested. This project is how I work: every protection in it was proven by switching it off and watching a test fail.
+
+- **GitHub:** [EmmanuelAjobo](https://github.com/EmmanuelAjobo)
+- **The live demo** has a contact footer too: [open it](https://saas-xray-production.up.railway.app)
 
 ## Contents
 
+- [Work with me](#work-with-me)
 - [What works today](#what-works-today)
 - [Engineering highlights](#engineering-highlights)
 - [Tech stack](#tech-stack)
@@ -41,11 +51,12 @@ This is a portfolio project, built in public, milestone by milestone. The design
 | "Try demo" button               |   ✅   | One click, no sign-up: a private, fully populated sandbox per visitor, role switching, bot protection, auto-cleanup              |
 | Deploy                          |   ✅   | Docker image, migrations on start, CI, live on Railway ([guide](docs/DEPLOY-RAILWAY.md))                                         |
 | Backend X-ray (API)             |   ✅   | Every request leaves a plain-English trail (membership, permission, database, answer), as history and a live stream             |
-| Billing, jobs, files, real-time |   ⏳   | Planned                                                                                                                          |
+| Background jobs                 |   ✅   | Invoice emails are queued (BullMQ on Redis) with retries and back-off, idempotent per invoice; a scheduled sweep marks past-due invoices OVERDUE |
+| Billing, files, real-time       |   ⏳   | Planned                                                                                                                          |
 | Demo Outbox                     |   ✅   | A demo sandbox never sends real email; the email it would have sent is captured and shown on the page, newest first                |
 | Demo page + X-ray panel         |   ✅   | One click into a sandbox; invoices, role switching, "try to break it" buttons, and the live X-ray timeline beside them             |
 
-Tests at this point: **1,206** (664 unit, 56 HTTP, 486 integration against real Postgres and Redis).
+Tests at this point: **1,350** (785 unit, 57 HTTP, 508 integration against real Postgres and Redis).
 
 ## Engineering highlights
 
@@ -58,6 +69,7 @@ Tests at this point: **1,206** (664 unit, 56 HTTP, 486 integration against real 
 - **Two independent lines of defence against cross-tenant leaks.** The guard stops outsiders at the URL; below it, the database client itself is scoped: every query on tenant data gets the organisation added automatically, a query with no organisation in context is refused, and a foreign key (an invoice's client, a task's assignee) must point at the caller's own organisation. A dedicated suite attacks every endpoint from a second organisation and checks the first is untouched.
 - **Roles are looked up on every request**, so a demotion or removal takes effect immediately, even for someone holding a valid token. Role changes re-check the permission under a database lock, and "an organisation always has an owner" holds even when two owners act at the same instant.
 - **Secure by default.** Every route requires a token unless it is explicitly marked `@Public()`, so a forgotten decorator makes an endpoint too strict, never open.
+- **Background work that survives trouble.** Invoice emails are Redis-backed jobs: retried with doubling back-off, idempotent per invoice (the same invoice's email can never be queued twice), failed ones kept for inspection, and a Redis outage on the queue side falls back to sending in-process instead of losing the email. Queued payloads hold nothing secret, which is why password-reset and invitation emails (whose links carry tokens) deliberately do not go through Redis.
 - **Tests that try to break it.** The integration suite runs the real app against a real database, and its safeguards were checked by deliberately breaking the code and watching the tests fail.
 
 ## Tech stack
@@ -79,7 +91,7 @@ Tests at this point: **1,206** (664 unit, 56 HTTP, 486 integration against real 
 
 ![System context](docs/images/01-system-context.png)
 
-The API is a modular monolith: global plumbing in `src/core/`, request-pipeline pieces in `src/common/`, and one folder per feature under `src/modules/`. A worker process for background jobs shares the same codebase and arrives with Milestone 10.
+The API is a modular monolith: global plumbing in `src/core/`, request-pipeline pieces in `src/common/`, and one folder per feature under `src/modules/`. Background jobs (invoice emails with retries, the overdue sweep) run from the same codebase: the worker lives inside the API process by default (`WORKER_ENABLED=false` makes a process queue-only, so a second process can run the worker).
 
 ![Auth flow](docs/images/05-auth-flow.png)
 
@@ -238,12 +250,12 @@ Owners and admins can edit or delete any task. A **member** can edit tasks they 
 | `POST /invoices`          | owner, admin | Create a DRAFT. The server assigns the number and computes the total                 |
 | `PATCH /invoices/:id`     | owner, admin | Edit a DRAFT. Sending `items` replaces all lines                                     |
 | `DELETE /invoices/:id`    | owner, admin | Soft-delete a DRAFT. Anything that was sent is voided instead                        |
-| `POST /invoices/:id/send` | owner, admin | DRAFT → SENT. Needs a priced line item; sets the due date; emails the client         |
+| `POST /invoices/:id/send` | owner, admin | DRAFT → SENT. Needs a priced line item; sets the due date; queues the email to the client (a background job) |
 | `POST /invoices/:id/pay`  | owner, admin | SENT or OVERDUE → PAID                                                               |
 | `POST /invoices/:id/void` | owner, admin | DRAFT, SENT or OVERDUE → VOID. A paid invoice cannot be voided                       |
 
 ```
-DRAFT ──send──▶ SENT ──pay──▶ PAID        (SENT → OVERDUE is a scheduled job, planned)
+DRAFT ──send──▶ SENT ──pay──▶ PAID        (SENT → OVERDUE is done by the scheduled sweep)
   │               └──void──▶ VOID
   └──void──▶ VOID
 ```
@@ -272,7 +284,10 @@ The backend narrates itself. Each request under an organisation leaves a few eve
 | `auth.check`   | Role MEMBER does not hold `client:write`: refused before any data was touched               |
 | `db.queries`   | 3 database queries in 12 ms, each confined to this organisation                             |
 | `http.request` | `POST /invoices/:id/send` answered 200 in 84 ms (or the refusal, with its reason)           |
-| `email.sent`   | The email went out after the response, linked to the click that caused it (or `email.captured` in a demo: kept in the sandbox's Outbox instead) |
+| `job.queued`   | Queued the invoice email to run in the background, so your click is not kept waiting |
+| `job.active` / `job.completed` | A worker picked it up (attempt 1 of 3), and finished in 85 ms: shown on the same card, a moment after the response |
+| `job.retry` / `job.failed` | The attempt failed; trying again in 5 s (the wait doubles). After the last attempt: given up on, kept in the failed set |
+| `email.sent`   | The email went out, linked to the click that caused it (or `email.captured` in a demo: kept in the sandbox's Outbox instead) |
 
 | Endpoint            | Who                                                  | What it does                                                                                      |
 | ------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -289,7 +304,7 @@ How it stays safe:
 
 Browsers cannot send an `Authorization` header from `EventSource`, so read the stream with `fetch` and a streaming reader. In Swagger, use `GET /xray/events` (the stream stays open).
 
-Not yet recorded (they arrive with their features): cache hits, background jobs, webhooks, rate-limit blocks. Rate-limit blocks cannot honestly be attributed to an organisation today, because the rate limiter runs before the caller is verified; showing them is planned with the job queue.
+Not yet recorded (they arrive with their features): cache hits, webhooks, rate-limit blocks. Rate-limit blocks cannot honestly be attributed to an organisation today, because the rate limiter runs before the caller is verified; showing them is the next step. A card's steps are ordered by when each one actually happened (events carry a microsecond-resolution time), so a fast background job never appears to run before the request that queued it.
 
 More endpoints are documented in Swagger as they are added.
 
@@ -301,6 +316,7 @@ Nothing that is sensitive or tunable is hard-coded. Every setting is read from t
 - **Security policy:** link lifetimes (`EMAIL_VERIFY_TTL_HOURS`, `PASSWORD_RESET_TTL_MINUTES`), session lengths, password-hashing cost (`PASSWORD_HASH_*`), and every rate limit (`RATE_LIMIT_*`).
 - **Timeouts and retries:** database, mail, health checks, Redis, CORS cache.
 - **Ports and the demo** (`DEMO_ENABLED`, `DEMO_TTL_HOURS`, `DEMO_MAX_ACTIVE`, `DEMO_PURGE_*`, `TURNSTILE_SECRET_KEY`).
+- **Background jobs** (`WORKER_ENABLED`, `JOBS_QUEUE_NAME`, `JOB_WORKER_CONCURRENCY`, `EMAIL_JOB_ATTEMPTS`, `JOB_BACKOFF_MS`, `JOB_KEEP_*`, `OVERDUE_SWEEP_*`).
 - **The demo Outbox** (`OUTBOX_MAX_MESSAGES`).
 - **The X-ray** (`XRAY_ENABLED`, `XRAY_BUFFER_SIZE`, `XRAY_BUFFER_TTL_SECONDS`, `XRAY_REPLAY_DEFAULT`, `XRAY_HEARTBEAT_SECONDS`, `XRAY_STREAM_MAX_SECONDS`, `XRAY_MAX_STREAMS_PER_USER`).
 
@@ -425,7 +441,8 @@ src/
 │   ├── logger/           pino + redaction
 │   ├── prisma/  redis/
 │   ├── mail/             SMTP and Resend transports, email templates
-│   ├── background/       fire-and-forget work (moves to a queue in Milestone 10)
+│   ├── background/       fire-and-forget work for auth emails (their links hold tokens, which must not sit in Redis)
+│   ├── jobs/             the queue (BullMQ on Redis), the runner that narrates each attempt, enqueue with an in-process fallback
 │   ├── rate-limit/       Redis-backed limiter and named policies
 │   ├── xray/             the X-ray plumbing: trace per request, Redis Streams store, publisher
 │   └── health/
@@ -440,6 +457,7 @@ src/
 │   ├── demo/             sandbox creation, role switching, expiry cleanup, captcha
 │   ├── xray/             the X-ray endpoints: history and live stream
 │   ├── outbox/           the demo Outbox: captured emails (Redis list per sandbox)
+│   ├── jobs/             what each job does: the invoice email, the overdue sweep
 │   └── billing/          plan entitlements (seat limits); Stripe arrives later
 └── seed/                 demo organisation template (db:seed, later "Try demo")
 prisma/                   schema and migrations
@@ -473,13 +491,14 @@ Mirrors [ARCHITECTURE §26](docs/ARCHITECTURE.md). ✅ built, ⏳ planned.
 - ✅ Tenant-scoped data access layer (the second line of defence below the guards)
 - ✅ Invitations, with plan seat limits
 - ✅ Clients, tasks and invoices, with the invoice state machine
-- ⏳ Invoice `Idempotency-Key` header and the overdue job (arrives with the job queue)
+- ✅ The overdue job (scheduled sweep). ⏳ Invoice `Idempotency-Key` header
 - ✅ "Try demo" endpoint, role switching, sandbox cleanup
 - ✅ Deploy: production image, migrations on start, CI, live on Railway. A custom domain and verified email sender are still to do
 
 **Phase 2: SaaS platform**
 
-- ⏳ Job queue and email worker, then a separate worker process
+- ✅ Job queue (BullMQ) with the invoice email and the overdue sweep; the worker runs inside the API process by default
+- ⏳ A dedicated worker entry point (`WORKER_ENABLED=false` already lets a second process do it)
 - ⏳ Stripe checkout, webhooks and plan limits
 - ⏳ File uploads, real-time notifications, reports and invoice PDFs
 - ⏳ API keys, caching

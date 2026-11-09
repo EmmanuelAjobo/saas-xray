@@ -14,6 +14,8 @@ import { OUTBOX_STORE } from '../../src/modules/outbox/outbox.types.js';
 import { TenantPrismaService } from '../../src/core/prisma/tenant-prisma.service.js';
 import { RedisThrottlerStorage } from '../../src/core/rate-limit/redis-throttler.storage.js';
 import { RedisService } from '../../src/core/redis/redis.service.js';
+import { InlineJobQueue } from '../../src/core/jobs/inline-job-queue.js';
+import { JOB_QUEUE } from '../../src/core/jobs/jobs.types.js';
 import { MemoryXrayStore } from '../../src/core/xray/memory-xray.store.js';
 import { XRAY_STORE } from '../../src/core/xray/xray.store.js';
 import { FakeMailTransport } from './fake-mail.js';
@@ -83,6 +85,9 @@ export async function createTestApp({
       // X-ray events kept in memory: tests of the layers above need no Redis streams.
       .overrideProvider(XRAY_STORE)
       .useClass(MemoryXrayStore)
+      // Jobs run in-process (through BackgroundTasks, so tests can drain()): no Redis queue.
+      .overrideProvider(JOB_QUEUE)
+      .useClass(InlineJobQueue)
       // Captured demo emails kept in memory too.
       .overrideProvider(OUTBOX_STORE)
       .useClass(MemoryOutboxStore);

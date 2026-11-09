@@ -16,6 +16,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service.js';
 import { tenantCheckEvent } from '../../core/xray/xray.events.js';
 import { recordXrayStep } from '../../core/xray/xray.trace.js';
+import { eventTime } from '../../core/xray/xray.clock.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -65,7 +66,9 @@ export class TenantGuard implements CanActivate {
     };
     request.tenant = tenant;
     this.context.setTenant(tenant);
-    recordXrayStep(tenantCheckEvent({ ts: Date.now(), role: membership.role }));
+    recordXrayStep(
+      tenantCheckEvent({ ts: eventTime(), role: membership.role }),
+    );
     return true;
   }
 }

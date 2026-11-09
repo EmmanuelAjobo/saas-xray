@@ -13,16 +13,11 @@ import {
   toPage,
 } from '../../common/pagination.js';
 import { DAY_MS } from '../../common/time.js';
-import { BackgroundTasks } from '../../core/background/background-tasks.service.js';
 import { escapeLike } from '../../common/search.js';
 import { AppConfigService } from '../../core/config/config.service.js';
+import { JobsService } from '../../core/jobs/jobs.service.js';
 import type { RequestTenant } from '../../core/context/request-context.service.js';
-import { MailService } from '../../core/mail/mail.service.js';
-import { invoiceSentTemplate } from '../../core/mail/templates.js';
 import { TenantPrismaService } from '../../core/prisma/tenant-prisma.service.js';
-import { emailEvent } from '../../core/xray/xray.events.js';
-import { OutboxService } from '../outbox/outbox.service.js';
-import { recordXrayStep } from '../../core/xray/xray.trace.js';
 import type { InvoiceStatus } from '../../generated/prisma/client.js';
 import type {
   CreateInvoiceDto,
@@ -131,9 +126,7 @@ export class InvoicesService {
   constructor(
     private readonly tenantDb: TenantPrismaService,
     private readonly config: AppConfigService,
-    private readonly mail: MailService,
-    private readonly background: BackgroundTasks,
-    private readonly outbox: OutboxService,
+    private readonly jobs: JobsService,
   ) {}
 
   private get db() {
@@ -395,14 +388,34 @@ export class InvoicesService {
     return this.get(id);
   }
 
+  // ───────────────────────────── background work ─────────────────────────────
+
+  /**
+   * Marks every SENT invoice of the current organisation that is past its due date as
+   * OVERDUE. Run by the scheduled sweep (as a system actor, inside the organisation's own
+   * tenant context). One atomic `UPDATE ... WHERE status = SENT`, so a payment that lands at
+   * the same moment either wins first (the invoice is no longer SENT) or finds it OVERDUE,
+   * which can still be paid.
+   */
+  async markOverdue(now: Date): Promise<number> {
+    const result = await this.db.invoice.updateMany({
+      where: { status: 'SENT', deletedAt: null, dueDate: { lt: now } },
+      data: { status: 'OVERDUE' },
+    });
+    return result.count;
+  }
+
   // ───────────────────────────── email ─────────────────────────────
 
   /**
-   * Real organisations: the client is emailed (after the response, failures never fail the
-   * request). Demo organisations never send real mail (ARCHITECTURE §18): the email is
-   * captured in the sandbox's Outbox instead, so the visitor can see what would have gone.
+   * Queues the email to the client; the click does not wait for it. A real organisation's
+   * email is delivered by the worker (with retries). A demo organisation never sends real
+   * mail (ARCHITECTURE §18): the worker keeps the email in the sandbox's Outbox instead, so
+   * the visitor sees what would have gone. Either way the job id is the invoice's, so the
+   * same invoice's email can never be queued twice.
    */
   private async notifyClient(invoice: {
+    id: string;
     number: string;
     currency: string;
     totalCents: number;
@@ -413,40 +426,21 @@ export class InvoicesService {
       select: { id: true, name: true, isDemo: true },
     });
     if (!org) return;
-    const amount = formatMoney(invoice.totalCents, invoice.currency);
-    const email = invoiceSentTemplate({
-      organizationName: org.name,
-      clientName: invoice.client.name,
-      number: invoice.number,
-      amount,
-      dueDate: (invoice.dueDate ?? new Date()).toISOString().slice(0, 10),
-    });
-    if (org.isDemo) {
-      // `org.id` comes from the tenant-scoped query above: the caller's own organisation.
-      await this.outbox.capture(org.id, {
+    await this.jobs.enqueue(
+      'invoice-email',
+      {
+        // `org.id` comes from the tenant-scoped query above: the caller's own organisation.
+        organizationId: org.id,
+        invoiceId: invoice.id,
+        delivery: org.isDemo ? 'outbox' : 'send',
         to: invoice.client.email,
-        subject: email.subject,
-        text: email.text,
-      });
-      recordXrayStep(
-        emailEvent({
-          ts: Date.now(),
-          template: 'invoice-sent',
-          outcome: 'captured',
-        }),
-      );
-      return;
-    }
-    this.background.run('invoice-sent-email', async () => {
-      await this.mail.send({ to: invoice.client.email, ...email });
-      // Only reached when delivery succeeded (a failure throws and is logged instead).
-      recordXrayStep(
-        emailEvent({
-          ts: Date.now(),
-          template: 'invoice-sent',
-          outcome: 'sent',
-        }),
-      );
-    });
+        organizationName: org.name,
+        clientName: invoice.client.name,
+        number: invoice.number,
+        amount: formatMoney(invoice.totalCents, invoice.currency),
+        dueDate: (invoice.dueDate ?? new Date()).toISOString().slice(0, 10),
+      },
+      { jobId: `invoice-email-${invoice.id}` },
+    );
   }
 }

@@ -39,6 +39,10 @@ Why `WEB_ORIGIN` is the API's own address: the sign-in cookie endpoints accept b
 
 Everything else has a safe default. Railway redeploys when variables change.
 
+## 4b. Redis for background jobs
+
+The invoice emails and the overdue sweep run as BullMQ jobs on the same Redis, inside the API process, so there is nothing extra to deploy. BullMQ needs Redis to **never evict keys**: if the Redis logs warn that the eviction policy is not `noeviction`, set `maxmemory-policy` to `noeviction` in the Redis service's configuration. Optional tuning (`EMAIL_JOB_ATTEMPTS`, `JOB_BACKOFF_MS`, `OVERDUE_SWEEP_INTERVAL_MINUTES`, ...) is in `.env.example`; the defaults are fine.
+
 ## 5. Health check and migrations
 
 - Service → **Settings** → **Healthcheck Path**: `/health/ready`.

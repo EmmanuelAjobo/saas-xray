@@ -5,6 +5,7 @@ import {
   httpRequestEvent,
 } from './xray.events.js';
 import { MAX_STEPS_PER_REQUEST } from './xray.limits.js';
+import { eventTime } from './xray.clock.js';
 
 /**
  * What happened during ONE request, collected as it runs and published once, when the
@@ -57,7 +58,7 @@ export class XrayTrace {
     status: number;
     durationMs: number;
   }): NewXrayEvent[] {
-    const now = Date.now();
+    const now = eventTime();
     const events = [...this.steps];
     if (this.queryCount > 0) {
       events.push(

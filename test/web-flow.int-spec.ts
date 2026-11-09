@@ -24,6 +24,7 @@ describe('the demo page’s client code against the real API', () => {
   let app: NestExpressApplication;
   let db: PrismaService;
   let xray: XrayService;
+  let background: Awaited<ReturnType<typeof createTestApp>>['background'];
   const stoppers: Array<() => void> = [];
 
   const origin = () =>
@@ -70,7 +71,7 @@ describe('the demo page’s client code against the real API', () => {
   }
 
   beforeAll(async () => {
-    ({ app } = await createTestApp({
+    ({ app, background } = await createTestApp({
       realDatabase: true,
       env: { TRUST_PROXY_HOPS: '1' },
     }));
@@ -167,6 +168,8 @@ describe('the demo page’s client code against the real API', () => {
       tone: 'ok',
     });
 
+    // The email is sent by a background job; wait for it before looking.
+    await background.drain();
     // The email a demo sandbox "sends" lands in its Outbox: every field the page shows is there.
     const outbox = await api.request('GET', `/v1/orgs/${orgId}/outbox`);
     expect(outbox.data).toHaveLength(1);
@@ -205,6 +208,7 @@ describe('the demo page’s client code against the real API', () => {
     expect(peek.text).toContain('404');
 
     // 9. The X-ray narrated all of it, grouped one card per click.
+    await background.drain();
     await xray.flush();
     await until(() =>
       timeline

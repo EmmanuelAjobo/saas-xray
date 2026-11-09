@@ -12,6 +12,7 @@ import { authCheckEvent } from '../../core/xray/xray.events.js';
 import { recordXrayStep } from '../../core/xray/xray.trace.js';
 import { type Permission, can } from './permissions.js';
 import { REQUIRED_PERMISSION_KEY } from './require-permission.decorator.js';
+import { eventTime } from '../../core/xray/xray.clock.js';
 
 /**
  * Role-based access control for tenant routes: the caller's role (set by TenantGuard) must
@@ -50,7 +51,7 @@ export class PermissionsGuard implements CanActivate {
     if (tenant) {
       recordXrayStep(
         authCheckEvent({
-          ts: Date.now(),
+          ts: eventTime(),
           role: tenant.role,
           permission: required,
           allowed,

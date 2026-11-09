@@ -3,6 +3,7 @@ import {
   dbQueriesEvent,
   emailEvent,
   httpRequestEvent,
+  jobEvent,
   plain,
   tenantCheckEvent,
 } from './xray.events.js';
@@ -168,6 +169,107 @@ describe('X-ray event builders', () => {
       expect(event.summary).toContain('demo sandboxes never send');
       expect(event.summary).toContain('Outbox');
       expect(JSON.stringify(event)).not.toMatch(/@/);
+    });
+  });
+
+  describe('jobEvent', () => {
+    const base = { ts: 1, label: 'invoice email', requestId: 'req-12345678' };
+
+    it.each([
+      ['queued', 'info', 'job.queued'],
+      ['active', 'info', 'job.active'],
+      ['completed', 'success', 'job.completed'],
+      ['retry', 'warn', 'job.retry'],
+      ['failed', 'error', 'job.failed'],
+    ] as const)('%s is a %s event of kind %s', (phase, severity, kind) => {
+      const event = jobEvent({ ...base, phase });
+      expect(event).toMatchObject({
+        kind,
+        severity,
+        requestId: 'req-12345678',
+      });
+      expect(event.title).toBe('Background job: invoice email');
+    });
+
+    it('says what happened in plain English, with the attempt', () => {
+      expect(jobEvent({ ...base, phase: 'queued' }).summary).toContain(
+        'so your click is not kept waiting',
+      );
+      expect(
+        jobEvent({ ...base, phase: 'active', attempt: 2, attempts: 3 }).summary,
+      ).toBe('A worker picked up the invoice email (attempt 2 of 3).');
+      expect(
+        jobEvent({ ...base, phase: 'completed', durationMs: 84.4 }).summary,
+      ).toBe('The invoice email finished in 84 ms.');
+    });
+
+    it('says when it will try again, in seconds or minutes', () => {
+      const retry = (ms: number) =>
+        jobEvent({
+          ...base,
+          phase: 'retry',
+          attempt: 1,
+          attempts: 3,
+          nextDelayMs: ms,
+        }).summary;
+      expect(retry(5_000)).toBe(
+        'The invoice email failed (attempt 1 of 3); trying again in 5 s.',
+      );
+      expect(retry(300)).toContain('in 1 s');
+      expect(retry(120_000)).toContain('in 2 min');
+    });
+
+    it('says a failed job was given up on and stays inspectable', () => {
+      expect(
+        jobEvent({ ...base, phase: 'failed', attempt: 3, attempts: 3 }).summary,
+      ).toContain('given up on');
+    });
+
+    it('can carry a short detail from our own code (the sweep: how many invoices)', () => {
+      expect(
+        jobEvent({
+          ts: 1,
+          label: 'overdue invoice sweep',
+          phase: 'completed',
+          durationMs: 5,
+          detail: '3 invoices marked overdue',
+        }).summary,
+      ).toBe(
+        'The overdue invoice sweep finished in 5 ms: 3 invoices marked overdue.',
+      );
+    });
+
+    it('keeps only flat facts in meta, and leaves out what it was not given', () => {
+      const event = jobEvent({ ...base, phase: 'queued' });
+      expect(event.meta).toEqual({ job: 'invoice email' });
+      const retry = jobEvent({
+        ...base,
+        phase: 'retry',
+        attempt: 1,
+        attempts: 3,
+        durationMs: 9.6,
+        nextDelayMs: 5_000,
+      });
+      expect(retry.meta).toEqual({
+        job: 'invoice email',
+        attempt: 1,
+        attempts: 3,
+        durationMs: 10,
+        nextDelayMs: 5_000,
+      });
+    });
+
+    it('has no way to carry a payload or an error message', () => {
+      const text = JSON.stringify(
+        jobEvent({ ...base, phase: 'failed', attempt: 3, attempts: 3 }),
+      );
+      expect(text).not.toMatch(/@|password|token|smtp/i);
+    });
+
+    it('omits the request id when there is none', () => {
+      expect(
+        jobEvent({ ts: 1, label: 'x', phase: 'queued' }),
+      ).not.toHaveProperty('requestId');
     });
   });
 

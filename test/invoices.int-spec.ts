@@ -59,7 +59,12 @@ describe('invoices (HTTP + real Postgres)', () => {
   beforeAll(async () => {
     ({ app, mail, background } = await createTestApp({
       realDatabase: true,
-      env: { TRUST_PROXY_HOPS: '1' },
+      env: {
+        TRUST_PROXY_HOPS: '1',
+        // The burst tests below check CORRECTNESS under concurrency, not speed: a slow
+        // machine must not turn a slow answer into a 408 and a false failure.
+        REQUEST_TIMEOUT_MS: '60000',
+      },
     }));
     db = app.get(PrismaService);
     client = createHttpClient(app);
@@ -187,7 +192,8 @@ describe('invoices (HTTP + real Postgres)', () => {
           create(owner, { clientId, items: ITEMS }),
         ),
       );
-      expect(results.every((r) => r.status === 201)).toBe(true);
+      // Compared as a whole so a failure shows every status, not just "false".
+      expect(results.map((r) => r.status)).toEqual(Array(12).fill(201));
       const numbers = results.map((r) => r.body.number as string).sort();
       expect(numbers).toEqual(
         Array.from(

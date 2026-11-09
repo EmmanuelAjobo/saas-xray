@@ -44,6 +44,11 @@ export class XrayEventDto {
       'db.queries',
       'email.sent',
       'email.captured',
+      'job.queued',
+      'job.active',
+      'job.completed',
+      'job.retry',
+      'job.failed',
     ],
   })
   kind!: string;

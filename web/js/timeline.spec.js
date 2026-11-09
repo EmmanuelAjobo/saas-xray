@@ -1,4 +1,4 @@
-import { compareIds, createTimeline } from './timeline.js';
+import { compareIds, createTimeline, outboxChanged } from './timeline.js';
 
 let counter = 0;
 /** An event as the server would send it. */
@@ -58,6 +58,86 @@ describe('createTimeline', () => {
     ]);
     expect(group?.title).toBe('POST /clients');
     expect(group?.request?.id).toBe('12-0');
+  });
+
+  it('orders a card’s steps by when they HAPPENED, not by when they were written (a fast job can report before its request does)', () => {
+    const t = createTimeline();
+    // The worker's events were written to the stream first (low ids) but happened AFTER the
+    // click's own steps (higher ts).
+    t.add(
+      event({
+        id: '10-0',
+        ts: 3000,
+        requestId: 'r',
+        kind: 'job.active',
+        title: 'Background job: invoice email',
+      }),
+    );
+    t.add(
+      event({
+        id: '11-0',
+        ts: 3100,
+        requestId: 'r',
+        kind: 'job.completed',
+        title: 'Background job: invoice email',
+      }),
+    );
+    t.add(
+      event({
+        id: '12-0',
+        ts: 1000,
+        requestId: 'r',
+        kind: 'tenant.check',
+        title: 'Organisation membership',
+      }),
+    );
+    t.add(
+      event({
+        id: '13-0',
+        ts: 2000,
+        requestId: 'r',
+        kind: 'job.queued',
+        title: 'Background job: invoice email',
+      }),
+    );
+    t.add(
+      event({
+        id: '14-0',
+        ts: 2500,
+        requestId: 'r',
+        kind: 'http.request',
+        title: 'POST /invoices/:id/send',
+      }),
+    );
+    const [group] = t.groups();
+    expect(group?.events.map((e) => e.kind)).toEqual([
+      'tenant.check',
+      'job.queued',
+      'http.request',
+      'job.active',
+      'job.completed',
+    ]);
+    expect(group?.startedAt).toBe(1000);
+  });
+
+  it('breaks a tie in time by stream id, so the order is always the same', () => {
+    const t = createTimeline();
+    t.add(event({ id: '12-0', ts: 5, requestId: 'r', kind: 'b' }));
+    t.add(event({ id: '11-0', ts: 5, requestId: 'r', kind: 'a' }));
+    expect(t.groups()[0]?.events.map((e) => e.kind)).toEqual(['a', 'b']);
+  });
+
+  it('ranks cards by their newest activity, even when a card’s last step by time is not its newest write', () => {
+    const t = createTimeline();
+    t.add(event({ id: '10-0', ts: 100, requestId: 'old' }));
+    // This card's NEWEST write (id 30) has an early timestamp; it must still rank first.
+    t.add(
+      event({ id: '20-0', ts: 9000, requestId: 'busy', kind: 'http.request' }),
+    );
+    t.add(
+      event({ id: '30-0', ts: 50, requestId: 'busy', kind: 'job.completed' }),
+    );
+    expect(t.groups().map((g) => g.key)).toEqual(['busy', 'old']);
   });
 
   it('keeps separate clicks on separate cards, newest first', () => {
@@ -176,5 +256,20 @@ describe('createTimeline', () => {
     t.clear();
     expect(t.groups()).toEqual([]);
     expect(t.add(event({ id: '10-0', requestId: 'r' }))).toBe(true);
+  });
+});
+
+describe('outboxChanged', () => {
+  it('is true for the event that says an email was captured', () => {
+    expect(outboxChanged({ kind: 'email.captured' })).toBe(true);
+  });
+  it.each([
+    'email.sent',
+    'job.queued',
+    'job.completed',
+    'http.request',
+    'auth.check',
+  ])('is false for %s', (kind) => {
+    expect(outboxChanged({ kind })).toBe(false);
   });
 });

@@ -224,6 +224,38 @@ const baseSchema = z.object({
   /** How long a "Try the demo" sandbox lives before it is deleted. */
   DEMO_TTL_HOURS: intSetting(24, 1, 168),
 
+  /**
+   * Background jobs (invoice emails, the overdue sweep). The worker runs inside this process
+   * unless WORKER_ENABLED=false (then only enqueueing happens here and another process runs
+   * the worker).
+   */
+  WORKER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  /** The Redis queue's name. Change it only to keep two deployments apart on one Redis. */
+  JOBS_QUEUE_NAME: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/, {
+      message: 'must be 1-64 letters, digits, "_" or "-"',
+    })
+    .default('saas-xray-jobs'),
+  /** Jobs one worker runs at the same time. */
+  JOB_WORKER_CONCURRENCY: intSetting(5, 1, 100),
+  /** An invoice email is tried this many times in total before it is given up on. */
+  EMAIL_JOB_ATTEMPTS: intSetting(3, 1, 10),
+  /** Wait before the first retry; it doubles after each failure. */
+  JOB_BACKOFF_MS: intSetting(5_000, 100, 3_600_000),
+  /** How long finished jobs are kept for inspection, and the most that are kept. */
+  JOB_KEEP_COMPLETED_SECONDS: intSetting(3_600, 60, 604_800),
+  JOB_KEEP_COMPLETED_COUNT: intSetting(1_000, 10, 100_000),
+  /** Failed jobs are kept this long (this is the dead-letter set). */
+  JOB_KEEP_FAILED_SECONDS: intSetting(604_800, 3_600, 2_592_000),
+  /** How often overdue invoices are marked, in minutes. 0 turns the sweep off. */
+  OVERDUE_SWEEP_INTERVAL_MINUTES: intSetting(60, 0, 1_440),
+  /** Organisations handled per sweep run (the rest wait for the next run). */
+  OVERDUE_SWEEP_ORG_BATCH: intSetting(100, 1, 10_000),
+
   /** Emails kept per demo sandbox in its Outbox (what the sandbox "sent" but never delivered). */
   OUTBOX_MAX_MESSAGES: intSetting(20, 1, 200),
 

@@ -379,3 +379,32 @@ export function renderOutbox({ messages }) {
         ),
   );
 }
+
+/**
+ * "Who built this, and how do I reach them": the footer shown on every screen. Driven by
+ * contact.json, so adding a link is a data edit. Returns nothing when there is no contact
+ * file (the page simply has no footer).
+ * @param {{ name: string, headline: string, links: Array<{ label: string, href: string }> } | undefined} contact
+ */
+export function renderContact(contact) {
+  if (!contact) return null;
+  return h(
+    'div',
+    { class: 'contact' },
+    h(
+      'p',
+      { class: 'contact-line' },
+      h('strong', null, contact.headline || 'Open to work'),
+      contact.headline ? ` · ${contact.name}` : contact.name,
+    ),
+    contact.links.length === 0
+      ? null
+      : h(
+          'ul',
+          { class: 'contact-links' },
+          contact.links.map((link) =>
+            h('li', null, h('a', { href: link.href }, link.label)),
+          ),
+        ),
+  );
+}
